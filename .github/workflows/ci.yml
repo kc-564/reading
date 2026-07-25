@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -41,17 +44,30 @@ jobs:
             ${{ runner.os }}-gradle-
 
       - name: Build with Gradle
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          mkdir -p ci-logs
+          if ./gradlew assembleDebug --no-daemon > ci-logs/build.log 2>&1; then
+            echo "BUILD_EXIT=0" >> ci-logs/status.txt
+          else
+            ec=$?
+            echo "BUILD_EXIT=$ec" >> ci-logs/status.txt
+            echo "===== BUILD LOG (tail) ====="
+            tail -n 120 ci-logs/build.log
+            exit $ec
+          fi
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --no-daemon
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v7
-        with:
-          name: reading-app-debug
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+        run: |
+          mkdir -p ci-logs
+          if ./gradlew testDebugUnitTest --no-daemon > ci-logs/test.log 2>&1; then
+            echo "TEST_EXIT=0" >> ci-logs/status.txt
+          else
+            ec=$?
+            echo "TEST_EXIT=$ec" >> ci-logs/status.txt
+            echo "===== TEST LOG (tail) ====="
+            tail -n 120 ci-logs/test.log
+            exit $ec
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -65,3 +81,32 @@ jobs:
 
       - name: Run TOC rule validation
         run: python tools/toc_validate.py
+
+      - name: Publish CI report (logs + APK) via git
+        if: always()
+        run: |
+          set -x
+          PUB=/tmp/ci-publish
+          rm -rf "$PUB"
+          mkdir -p "$PUB/ci-logs" "$PUB/apk"
+          cp -r ci-logs/. "$PUB/ci-logs/" 2>/dev/null || echo "no ci-logs produced" > "$PUB/ci-logs/.none"
+          echo "RUN_ID=${GITHUB_RUN_ID}"        > "$PUB/run.json"
+          echo "SHA=${GITHUB_SHA}"             >> "$PUB/run.json"
+          echo "REF=${GITHUB_REF}"             >> "$PUB/run.json"
+          echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$PUB/run.json"
+          # include APK if it exists (build succeeded)
+          shopt -s nullglob
+          for f in app/build/outputs/apk/debug/*.apk; do
+            cp "$f" "$PUB/apk/"
+          done
+          if [ -z "$(ls -A "$PUB/apk" 2>/dev/null)" ]; then
+            echo "no apk produced" > "$PUB/apk/.none"
+          fi
+          cd "$PUB"
+          git init -q
+          git config user.email "ci@github.com"
+          git config user.name "ci-bot"
+          git add -A
+          git commit -q -m "ci report ${GITHUB_SHA} run ${GITHUB_RUN_ID}"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/kc-564/reading.git"
+          git push -f origin HEAD:ci-reports
