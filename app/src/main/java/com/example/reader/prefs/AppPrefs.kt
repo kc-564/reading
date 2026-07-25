@@ -279,7 +279,11 @@ class AppPrefs(private val context: Context) {
                 }.getOrDefault(TocRules.ALL.associate { it.id to true }.toMutableMap())
             }
             map[ruleId] = enabled
-            prefs[KEY_GLOBAL_TOC_RULES] = org.json.JSONObject(map).toString()
+            val json = org.json.JSONObject()
+            for ((k, v) in map) {
+                json.put(k, v)
+            }
+            prefs[KEY_GLOBAL_TOC_RULES] = json.toString()
         }
     }
 
