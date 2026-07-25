@@ -56,7 +56,7 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
             .map { sessions ->
                 val totalSecs = sessions.sumOf { it.durationSec }
                 ReadingStats(
-                    totalMinutes = totalSecs / 60,
+                    totalMinutes = (totalSecs / 60).toLong(),
                     bookCount = sessions.map { it.bookId }.distinct().size,
                     totalChars = 0L
                 )
@@ -69,7 +69,7 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
             .map { sessions ->
                 val totalSecs = sessions.sumOf { it.durationSec }
                 ReadingStats(
-                    totalMinutes = totalSecs / 60,
+                    totalMinutes = (totalSecs / 60).toLong(),
                     bookCount = sessions.map { it.bookId }.distinct().size,
                     totalChars = 0L
                 )
