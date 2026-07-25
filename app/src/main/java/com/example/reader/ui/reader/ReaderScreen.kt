@@ -1,24 +1,23 @@
 package com.example.reader.ui.reader
 
 import android.app.Application
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,14 +32,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.reader.db.AppDatabase
-import com.example.reader.db.HighlightEntity
 import com.example.reader.feature.highlight.HighlightManager
 import kotlinx.coroutines.launch
 
 /**
- * Reader screen orchestrator. Combines the paginated content ([ReaderContent]), the bottom
- * status bar + toolbar, the left TOC drawer, and the bottom sheets (settings / bookmarks /
- * search / highlights). All reading tools are bottom-anchored per the shared convention.
+ * Reader screen orchestrator (v1.1). The old Scaffold + persistent bars have been replaced by
+ * a Column layout with [AnimatedVisibility]-wrapped [ReaderTopBar] and [ReaderBottomBar].
+ *
+ * Panels are hidden by default; tapping the center (or non-page-flip zones) toggles them.
+ * The [ModalNavigationDrawer] still hosts the TOC on the left side.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -79,7 +79,7 @@ fun ReaderScreen(
 
         is ReaderUiState.Ready -> {
             val pagerState = rememberPagerState(pageCount = { state.globalPages.size })
-            val drawerState = rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
+            val drawerState = rememberDrawerState(DrawerValue.Closed)
             val scope = rememberCoroutineScope()
 
             val highlightManager = remember { HighlightManager(AppDatabase.getInstance(context)) }
@@ -87,6 +87,11 @@ fun ReaderScreen(
             val highlightsByChapter = remember(highlights) { highlights.groupBy { it.chapterIndex } }
 
             var sheet: ReaderSheet? by remember { mutableStateOf(null) }
+
+            // ── Collapsible panel state ──
+            var panelsVisible by remember { mutableStateOf(false) }
+
+            val bookTitle = state.chapters.getOrNull(state.currentChapterIndex)?.title ?: ""
 
             ModalNavigationDrawer(
                 drawerState = drawerState,
@@ -103,54 +108,53 @@ fun ReaderScreen(
                     )
                 }
             ) {
-                Scaffold(
-                    topBar = {
-                        TopAppBar(
-                            title = {
-                                Text(
-                                    text = state.chapters.getOrNull(state.currentChapterIndex)?.title ?: "",
-                                    maxLines = 1
-                                )
-                            },
-                            navigationIcon = {
-                                IconButton(onClick = onNavigateBack) {
-                                    Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
-                                }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.surface,
-                                titleContentColor = MaterialTheme.colorScheme.onSurface
-                            )
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // ── Top bar (animated) ──
+                    AnimatedVisibility(
+                        visible = panelsVisible,
+                        enter = fadeIn() + slideInVertically { -it },
+                        exit = fadeOut() + slideOutVertically { -it }
+                    ) {
+                        ReaderTopBar(
+                            bookTitle = bookTitle,
+                            onBack = onNavigateBack,
+                            onSearch = { sheet = ReaderSheet.Search },
+                            onBookmarks = { sheet = ReaderSheet.Bookmark }
                         )
-                    },
-                    bottomBar = {
-                        Column {
-                            ReaderToolbar(
-                                onToc = { scope.launch { drawerState.open() } },
-                                onSettings = { sheet = ReaderSheet.Settings },
-                                onBookmark = { sheet = ReaderSheet.Bookmark },
-                                onSearch = { sheet = ReaderSheet.Search },
-                                onHighlight = { sheet = ReaderSheet.Highlight }
-                            )
-                            ReaderStatusBar(state = state, pagerState = pagerState)
-                        }
                     }
-                ) { paddingValues ->
+
+                    // ── Reading content ──
                     ReaderContent(
                         state = state,
                         viewModel = viewModel,
                         styleConfig = styleConfig,
                         highlightsByChapter = highlightsByChapter,
                         pagerState = pagerState,
-                        onOpenMenu = { sheet = ReaderSheet.Settings },
+                        onOpenMenu = { /* panels handle this now */ },
                         onOpenToc = { scope.launch { drawerState.open() } },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(paddingValues)
+                        onPanelToggle = { panelsVisible = !panelsVisible },
+                        modifier = Modifier.weight(1f)
                     )
+
+                    // ── Bottom bar (animated) ──
+                    AnimatedVisibility(
+                        visible = panelsVisible,
+                        enter = fadeIn() + slideInVertically { it },
+                        exit = fadeOut() + slideOutVertically { it }
+                    ) {
+                        Column {
+                            ReaderBottomBar(
+                                currentChapterIndex = state.currentChapterIndex,
+                                totalChapters = state.chapters.size,
+                                onToc = { scope.launch { drawerState.open() } }
+                            )
+                            ReaderStatusBar(state = state, pagerState = pagerState)
+                        }
+                    }
                 }
             }
 
+            // ── Bottom sheets (unchanged) ──
             when (sheet) {
                 ReaderSheet.Settings -> SettingsSheet(onDismiss = { sheet = null })
                 ReaderSheet.Bookmark -> BookmarkSheet(
