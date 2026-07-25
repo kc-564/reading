@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,24 +35,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.paint
 import com.example.reader.R
 import com.example.reader.db.HighlightEntity
-import com.example.reader.engine.GlobalPage
 import com.example.reader.engine.ReaderPagination
 import com.example.reader.engine.ReaderStyleConfig
 import com.example.reader.feature.animation.pageAnimation
 import com.example.reader.ui.theme.ClickZoneAction
 import com.example.reader.feature.clickzone.ClickZoneHandler
 import com.example.reader.feature.fonts.FontManager
-import com.example.reader.ui.theme.ReaderThemeColors
 import com.example.reader.ui.theme.readerColors
 import kotlinx.coroutines.launch
 
 /**
  * Core reader surface: paginated pager + tap zones + volume keys + RTL + animation.
  *
- * Pagination runs here (where the [androidx.compose.ui.text.TextMeasurer] lives) and is pushed
- * back into the ViewModel via [ReaderViewModel.applyPagination]. Changing the layout config
- * re-paginates while preserving the character offset, so the pager re-targets the same position
- * instead of jumping to page 0.
+ * v1.1: [onPanelToggle] is called when the user taps a non-page-flip zone (NONE action)
+ * or the OPEN_MENU zone, toggling the reader panels (top bar + bottom bar) visibility.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -65,6 +60,7 @@ fun ReaderContent(
     pagerState: PagerState,
     onOpenMenu: () -> Unit,
     onOpenToc: () -> Unit,
+    onPanelToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -131,7 +127,7 @@ fun ReaderContent(
         LaunchedEffect(pagerState.currentPage) {
             val ps = pagesState.value
             if (ps.isNotEmpty() && pagerState.currentPage in ps.indices) {
-                val gp: GlobalPage = ps[pagerState.currentPage]
+                val gp = ps[pagerState.currentPage]
                 viewModel.saveProgress(gp.chapterIndex, gp.charStart)
             }
         }
@@ -164,9 +160,12 @@ fun ReaderContent(
                                     )
                                 }
 
-                                ClickZoneAction.OPEN_MENU -> onOpenMenu()
+                                // v1.1: OPEN_MENU now toggles the reader panels instead of
+                                // opening the settings sheet. NONE also toggles panels for
+                                // zones that aren't mapped to any specific action.
+                                ClickZoneAction.OPEN_MENU -> onPanelToggle()
                                 ClickZoneAction.OPEN_TOC -> onOpenToc()
-                                ClickZoneAction.NONE -> {}
+                                ClickZoneAction.NONE -> onPanelToggle()
                             }
                         }
                     }
