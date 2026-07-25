@@ -30,7 +30,7 @@ import java.io.File
 /**
  * Bottom-sheet batch importer (D03 / C05).
  *
- * Lets the user pick multiple files (TXT / ZIP / RAR) or an entire folder tree. Selected
+ * Lets the user pick multiple files (TXT / EPUB / ZIP / RAR) or an entire folder tree. Selected
  * documents are copied into the app cache (so SAF `content://` URIs become plain file paths),
  * then handed to [ImportManager.importArchives] which extracts archives and upserts books.
  *
@@ -105,8 +105,15 @@ private fun runImport(
 
 /** Copies a `content://` document into the app cache and returns its file path, or null. */
 private fun copyUriToCache(context: Context, uri: Uri): String? = runCatching {
-    val safeName = "imp_${System.nanoTime()}_${uri.lastPathSegment ?: "file"}"
-        .replace(Regex("[^\\w.\\-]"), "_")
+    // Try to preserve the original filename from the SAF URI
+    val originalName = uri.lastPathSegment
+        ?.replace(Regex("[^\\w.\\-\\u4e00-\\u9fff]"), "_")
+        ?: "file"
+    val safeName = if (originalName.contains(".")) {
+        "imp_${System.nanoTime()}_$originalName"
+    } else {
+        "imp_${System.nanoTime()}_$originalName"
+    }
     val dir = File(context.cacheDir, "imports")
     if (!dir.exists()) dir.mkdirs()
     val target = File(dir, safeName)
@@ -116,7 +123,7 @@ private fun copyUriToCache(context: Context, uri: Uri): String? = runCatching {
     target.absolutePath
 }.getOrNull()
 
-/** Recursively collects TXT / ZIP / RAR files under a document tree. */
+/** Recursively collects TXT / ZIP / RAR / EPUB files under a document tree. */
 private fun collectTreePaths(context: Context, treeUri: Uri): List<String> {
     val result = mutableListOf<String>()
     val tree = DocumentFile.fromTreeUri(context, treeUri) ?: return result
@@ -128,7 +135,9 @@ private fun collectTreePaths(context: Context, treeUri: Uri): List<String> {
                 stack.add(child)
             } else {
                 val name = child.name ?: ""
-                if (name.endsWith(".txt", true) || name.endsWith(".zip", true) || name.endsWith(".rar", true)) {
+                if (name.endsWith(".txt", true) || name.endsWith(".zip", true) ||
+                    name.endsWith(".rar", true) || name.endsWith(".epub", true)
+                ) {
                     copyUriToCache(context, child.uri)?.let { result.add(it) }
                 }
             }
