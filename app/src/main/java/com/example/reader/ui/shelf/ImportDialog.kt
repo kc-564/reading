@@ -48,7 +48,7 @@ fun ImportDialog(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val filePicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentMultiple()
+        ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         val paths = uris.mapNotNull { copyUriToCache(context, it) }

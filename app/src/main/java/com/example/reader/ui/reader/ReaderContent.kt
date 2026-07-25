@@ -23,9 +23,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.layout.onSizeChanged
@@ -37,7 +34,6 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.paint
-import androidx.compose.ui.input.key.KeyEvent
 import com.example.reader.R
 import com.example.reader.db.HighlightEntity
 import com.example.reader.engine.GlobalPage
@@ -172,28 +168,6 @@ fun ReaderContent(
                                 ClickZoneAction.OPEN_TOC -> onOpenToc()
                                 ClickZoneAction.NONE -> {}
                             }
-                        }
-                    }
-                    .onKeyEvent { keyEvent ->
-                        if (keyEvent.type != KeyEventType.KeyUp) return@onKeyEvent false
-                        when (keyEvent.key) {
-                            Key.VolumeUp -> {
-                                coroutineScope.launch {
-                                    pagerState.scrollToPage((pagerState.currentPage - 1).coerceAtLeast(0))
-                                }
-                                true
-                            }
-
-                            Key.VolumeDown -> {
-                                coroutineScope.launch {
-                                    pagerState.scrollToPage(
-                                        (pagerState.currentPage + 1).coerceAtMost(pagesState.value.lastIndex.coerceAtLeast(0))
-                                    )
-                                }
-                                true
-                            }
-
-                            else -> false
                         }
                     }
             ) {
