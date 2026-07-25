@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -25,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import com.example.reader.feature.export.ExportManager
 import com.example.reader.feature.search.SearchHit
 import android.widget.Toast
+import kotlinx.coroutines.launch
 
 /**
  * Full-text search sheet (D02). Typing filters the book; tapping a result jumps to its position.

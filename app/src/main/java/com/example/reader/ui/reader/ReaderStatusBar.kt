@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +24,7 @@ import androidx.compose.ui.unit.dp
  * Bottom status bar showing the current chapter title and the book-wide page position
  * (current / total · percent). TalkBack descriptions are provided for accessibility (E04).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ReaderStatusBar(
     state: ReaderUiState.Ready,

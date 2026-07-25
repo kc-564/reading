@@ -12,12 +12,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.reader.db.HighlightEntity
 import com.example.reader.ui.theme.ReaderThemeColors
 import com.example.reader.util.ParagraphSplitter
@@ -54,7 +56,10 @@ fun ReaderPage(
     val pageText = if (safeEnd > safeStart) chapterText.substring(safeStart, safeEnd) else ""
     val paragraphs = if (pageText.isNotEmpty()) ParagraphSplitter.split(pageText) else emptyList()
 
-    val indent = if (firstLineIndentPx > 0) TextIndent(firstLine = firstLineIndentPx.dp) else TextIndent.None
+    val density = LocalDensity.current
+    val indent = if (firstLineIndentPx > 0) {
+        TextIndent(firstLine = (firstLineIndentPx.toFloat() / density.density).sp)
+    } else TextIndent.None
 
     val innerModifier = modifier
         .fillMaxSize()

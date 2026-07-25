@@ -1,7 +1,6 @@
 package com.example.reader.feature.fonts
 
 import android.content.Context
-import android.graphics.Typeface
 import android.net.Uri
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -40,8 +39,7 @@ class FontManager(private val context: Context) {
         if (fonts.isEmpty()) return FontFamily.Default
         val target = fonts.firstOrNull { it.id == importedId } ?: fonts.first()
         return runCatching {
-            val typeface = Typeface.Builder(target.path).build()
-            FontFamily(Font(typeface))
+            FontFamily(Font(target.path))
         }.getOrElse { FontFamily.Default }
     }
 

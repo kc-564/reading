@@ -43,7 +43,7 @@ import com.example.reader.engine.GlobalPage
 import com.example.reader.engine.ReaderPagination
 import com.example.reader.engine.ReaderStyleConfig
 import com.example.reader.feature.animation.pageAnimation
-import com.example.reader.feature.clickzone.ClickZoneAction
+import com.example.reader.ui.theme.ClickZoneAction
 import com.example.reader.feature.clickzone.ClickZoneHandler
 import com.example.reader.feature.fonts.FontManager
 import com.example.reader.ui.theme.ReaderThemeColors

@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Switch
@@ -19,6 +19,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -40,6 +42,7 @@ fun TocDrawer(
     onChapterClick: (Int) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val dao = remember { AppDatabase.getInstance(context).tocRulePrefDao() }
     val prefs by dao.getByBookId(bookId).collectAsState(initial = emptyList())
     val enabledMap = remember(prefs) { prefs.associate { it.ruleId to it.enabled } }
@@ -65,7 +68,7 @@ fun TocDrawer(
                     )
                 }
             }
-            HorizontalDivider()
+            Divider()
             Text("章节识别规则", style = MaterialTheme.typography.titleSmall)
             TocRules.ALL.forEach { rule ->
                 val checked = enabledMap[rule.id] ?: true
@@ -77,7 +80,9 @@ fun TocDrawer(
                     Switch(
                         checked = checked,
                         onCheckedChange = { enabled ->
-                            dao.upsert(TocRulePrefEntity(bookId = bookId, ruleId = rule.id, enabled = enabled))
+                            scope.launch {
+                                dao.upsert(TocRulePrefEntity(bookId = bookId, ruleId = rule.id, enabled = enabled))
+                            }
                         }
                     )
                 }

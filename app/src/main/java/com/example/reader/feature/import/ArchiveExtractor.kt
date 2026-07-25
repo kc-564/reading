@@ -62,15 +62,13 @@ class ArchiveExtractor {
             val dir = tempDir()
             val archive = Archive(file)
             try {
-                var header: FileHeader? = archive.nextFileHeader
-                while (header != null) {
+                for (header in archive.fileHeaders) {
                     val name = header.fileName
                     if (name != null && name.endsWith(".txt", ignoreCase = true)) {
                         val target = File(dir, "${System.nanoTime()}_${File(name).name}")
                         FileOutputStream(target).use { os -> archive.extractFile(header, os) }
                         out.add(target.absolutePath)
                     }
-                    header = archive.nextFileHeader
                 }
             } finally {
                 runCatching { archive.close() }

@@ -1,5 +1,6 @@
 package com.example.reader.feature.animation
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -14,6 +15,7 @@ import com.example.reader.ui.theme.PageAnimationMode
  *   slide remains. Documented as a known limitation.
  * - [PageAnimationMode.FLIP3D]: a `rotationY` 3D-flip approximation during the transition.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Modifier.pageAnimation(
     mode: PageAnimationMode,

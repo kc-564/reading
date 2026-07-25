@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -205,8 +206,9 @@ class ReaderViewModel(
     fun jumpTo(chapterIndex: Int, charOffset: Int) {
         val state = _uiState.value
         if (state !is ReaderUiState.Ready) return
-        val targetPage = if (lastPagination != null) {
-            pagination.globalPageOf(lastPagination, chapterIndex, charOffset)
+        val p = lastPagination
+        val targetPage = if (p != null) {
+            pagination.globalPageOf(p, chapterIndex, charOffset)
         } else state.currentGlobalPage
         _uiState.value = state.copy(
             currentChapterIndex = chapterIndex,
