@@ -74,7 +74,7 @@ fun ImportDialog(
             Spacer(Modifier.height(12.dp))
             Button(
                 onClick = {
-                    filePicker.launch(arrayOf("text/plain", "application/zip", "application/x-rar-compressed", "*/*"))
+                    filePicker.launch("*/*")
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("选择文件 / 压缩包（可多选）") }
