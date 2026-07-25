@@ -1,6 +1,5 @@
 package com.example.reader.ui.shelf
 
-import android.app.Application
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +25,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -37,8 +35,6 @@ import com.example.reader.db.ReadingHistoryEntity
 fun ShelfScreen(
     onNavigateToReader: (String) -> Unit = {}
 ) {
-    val context = LocalContext.current
-    val application = context.applicationContext as Application
     val viewModel: ShelfViewModel = viewModel()
     val recentHistory by viewModel.recentHistory.collectAsState()
     val allBooks by viewModel.allBooks.collectAsState()
