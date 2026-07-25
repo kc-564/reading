@@ -51,7 +51,7 @@ class LayoutEngine(private val textMeasurer: TextMeasurer) {
                 // Lines 0 .. lineCount-2 are fully visible; lineCount-1 is the overflow line.
                 val lastVisibleLine = (layoutResult.lineCount - 2).coerceAtLeast(0)
                 val lineEnd = layoutResult.getLineEnd(
-                    line = lastVisibleLine,
+                    lineIndex = lastVisibleLine,
                     visibleEnd = true
                 ).coerceAtMost(remaining.length)
 
