@@ -4,24 +4,24 @@
     android:height="48dp"
     android:viewportWidth="48"
     android:viewportHeight="48"
-    android:tint="?attr/colorOnSurfaceVariant">
+    android:tint="#FF8A8A8A">
     <!-- Book outline -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeWidth="2"
-        android:strokeColor="?attr/colorOnSurfaceVariant"
+        android:strokeColor="#FF8A8A8A"
         android:pathData="M8,6 L8,40 A2,2 0 0,0 10,42 L38,42 A2,2 0 0,0 40,40 L40,6 A2,2 0 0,0 38,4 L10,4 A2,2 0 0,0 8,6 Z" />
     <!-- Spine line -->
     <path
         android:fillColor="@android:color/transparent"
         android:strokeWidth="1.5"
-        android:strokeColor="?attr/colorOnSurfaceVariant"
+        android:strokeColor="#FF8A8A8A"
         android:pathData="M24,4 L24,42" />
     <!-- Question mark (bottom center) -->
     <path
-        android:fillColor="?attr/colorOnSurfaceVariant"
+        android:fillColor="#FF8A8A8A"
         android:pathData="M20,34 C20,32.3 21.8,31.5 22.8,30.6 C23.8,29.7 24.5,28.5 24.5,27 C24.5,25 23,24 21.5,24 C20,24 18.5,25 18,26.5 L15.5,26 C16.2,23 18.5,21.5 21.5,21.5 C24.5,21.5 27,23.2 27,27 C27,29.2 25.8,30.8 24.5,31.8 C23.2,32.8 22.5,33.5 22.5,34 L20,34 Z" />
     <path
-        android:fillColor="?attr/colorOnSurfaceVariant"
+        android:fillColor="#FF8A8A8A"
         android:pathData="M21.5,37 C20.7,37 20,36.3 20,35.5 C20,34.7 20.7,34 21.5,34 C22.3,34 23,34.7 23,35.5 C23,36.3 22.3,37 21.5,37 Z" />
 </vector>
