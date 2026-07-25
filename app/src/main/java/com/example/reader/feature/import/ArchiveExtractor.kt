@@ -10,10 +10,12 @@ import java.util.zip.ZipInputStream
 
 /**
  * Extracts text files from zip / rar archives (D03).
+ * EPUB files are passed through as-is (parsed later by [EpubParser]).
  *
  * - zip: JDK `java.util.zip` (no extra dependency).
  * - rar: `com.github.anjoze:junrar` (best-effort; rar5 is unsupported and will be skipped on
  *   failure — the caller still imports any zip/plain files).
+ * - epub: passed through directly (parsed by [EpubParser]).
  *
  * Extracted files land in a temp directory; the returned list feeds [ImportManager].
  */
@@ -26,6 +28,7 @@ class ArchiveExtractor {
             when (file.extension.lowercase()) {
                 "zip" -> extractZip(file, out)
                 "rar" -> extractRar(file, out)
+                "epub" -> if (file.isFile) out.add(path) // pass-through; EpubParser handles internally
                 else -> if (file.isFile) out.add(path)
             }
         }
