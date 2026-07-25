@@ -44,6 +44,10 @@ interface StatsDao {
 
     @Query("SELECT COALESCE(SUM(duration_sec), 0) FROM reading_sessions")
     fun getTotalDurationAll(): Flow<Int>
+
+    /** Sessions from the last 7 days (by started_at). */
+    @Query("SELECT * FROM reading_sessions WHERE started_at >= :sinceMillis ORDER BY started_at DESC")
+    fun getSessionsSince(sinceMillis: Long): Flow<List<ReadingSessionEntity>>
 }
 
 /**
