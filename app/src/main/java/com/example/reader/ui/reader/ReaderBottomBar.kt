@@ -124,7 +124,7 @@ fun ReaderBottomBar(
 
             // ── Chapter info ──
             Text(
-                text = "第${currentChapterIndex + 1}章/$totalChapters章",
+                text = "第${currentChapterIndex + 1}章/${totalChapters}章",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
