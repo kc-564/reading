@@ -18,9 +18,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -41,9 +44,9 @@ import com.example.reader.db.BookEntity
 /**
  * Profile / personal screen (v1.1).
  *
- * Shows recent reading history (deduplicated), quick entries to reading stats
- * and system settings. The WiFi transfer and reading stats that were in the
- * Shelf top bar have been migrated here.
+ * Shows recent reading history (deduplicated) with BookCover thumbnails,
+ * a reading-stats summary row (cumulative / weekly / monthly), and
+ * quick entries to the full stats view and system settings.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,12 +57,14 @@ fun ProfileScreen(
 ) {
     val viewModel: ProfileViewModel = viewModel()
     val recentBooks by viewModel.recentDistinctBooks.collectAsStateWithLifecycle(emptyList())
-    val totalReadingMinutes by viewModel.totalReadingMinutes.collectAsStateWithLifecycle(0L)
+    val totalStats by viewModel.totalStats.collectAsStateWithLifecycle(ReadingStats())
+    val weeklyStats by viewModel.weeklyStats.collectAsStateWithLifecycle(ReadingStats())
+    val monthlyStats by viewModel.monthlyStats.collectAsStateWithLifecycle(ReadingStats())
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("个人") },
+                title = { Text("个人中心") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface
@@ -82,12 +87,10 @@ fun ProfileScreen(
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 ) {
                     items(recentBooks, key = { it.bookId }) { book ->
-                        Box(modifier = Modifier.width(120.dp)) {
-                            RecentBookItem(
-                                book = book,
-                                onClick = { onNavigateToReader(book.bookId) }
-                            )
-                        }
+                        RecentBookCard(
+                            book = book,
+                            onClick = { onNavigateToReader(book.bookId) }
+                        )
                     }
                 }
                 Spacer(Modifier.height(16.dp))
@@ -95,13 +98,27 @@ fun ProfileScreen(
                 Spacer(Modifier.height(8.dp))
             }
 
-            // ── Reading stats entry ──
+            // ── Reading stats summary ──
+            Text("阅读统计", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                StatChip(label = "累计阅读", value = formatMinutes(totalStats.totalMinutes))
+                StatChip(label = "本周", value = formatMinutes(weeklyStats.totalMinutes))
+                StatChip(label = "本月", value = formatMinutes(monthlyStats.totalMinutes))
+            }
+            Spacer(Modifier.height(12.dp))
             ProfileEntryRow(
-                label = "阅读统计",
-                subtitle = "累计 ${totalReadingMinutes} 分钟",
+                label = "查看详细统计",
+                subtitle = "${totalStats.bookCount} 本书 · ${formatMinutes(totalStats.totalMinutes)}",
                 onClick = onNavigateToStats
             )
-            Divider(modifier = Modifier.padding(vertical = 4.dp))
+
+            Spacer(Modifier.height(8.dp))
+            Divider()
+            Spacer(Modifier.height(8.dp))
 
             // ── System settings entry ──
             ProfileEntryRow(
@@ -112,6 +129,8 @@ fun ProfileScreen(
         }
     }
 }
+
+// ── Private composables ──
 
 @Composable
 private fun ProfileEntryRow(
@@ -142,11 +161,11 @@ private fun ProfileEntryRow(
 }
 
 /**
- * Simplified recent-book item used in the profile LazyRow.
- * Shows a coloured placeholder tile with the book title.
+ * Card used in the profile LazyRow for a recent book.
+ * Shows cover thumbnail (coloured placeholder or image), title, and progress bar.
  */
 @Composable
-private fun RecentBookItem(
+private fun RecentBookCard(
     book: BookEntity,
     onClick: () -> Unit
 ) {
@@ -156,31 +175,73 @@ private fun RecentBookItem(
         0.55f
     )
 
-    Column(
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .fillMaxWidth()
+    Card(
+        modifier = Modifier.width(130.dp),
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(90.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(placeholderColor),
-            contentAlignment = Alignment.Center
-        ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            // Cover area
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(100.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(placeholderColor),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = book.title.firstOrNull()?.toString() ?: "?",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = Color.White
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            // Title
             Text(
-                text = book.title.firstOrNull()?.toString() ?: "?",
-                style = MaterialTheme.typography.headlineSmall,
-                color = Color.White
+                text = book.title,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            // Progress
+            LinearProgressIndicator(
+                progress = { book.progressPercent.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp))
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "${(book.progressPercent * 100).toInt()}%",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Spacer(Modifier.height(4.dp))
+    }
+}
+
+@Composable
+private fun StatChip(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            text = book.title,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            text = value,
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.primary
         )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/** Formats total minutes into a human-readable string. */
+private fun formatMinutes(minutes: Long): String {
+    return when {
+        minutes < 60 -> "${minutes}分钟"
+        minutes < 1440 -> "%.1f小时".format(minutes / 60.0)
+        else -> "%.1f天".format(minutes / 1440.0)
     }
 }
