@@ -38,12 +38,16 @@ import java.nio.charset.StandardCharsets
 /**
  * ViewModel for the reader screen.
  *
- * Responsibilities (Phase 2):
+ * Responsibilities (Phase 2 → v1.1):
  * - Load + parse + restore progress.
  * - Hold the [ReaderPagination] result and re-paginate when layout config changes while
  *   **preserving the character offset** (never jumps back to page 0).
  * - Full-book percentage / global page mapping.
  * - Bookmarks, full-text search, and reading-stats heartbeat.
+ *
+ * v1.1 additions:
+ * - [applyStyleConfig] writes layout parameters to [AppPrefs], which flows back and
+ *   triggers re-pagination.
  */
 class ReaderViewModel(
     application: Application,
@@ -182,6 +186,38 @@ class ReaderViewModel(
     init {
         viewModelScope.launch {
             prefs.styleConfigFlow.collect { _styleConfigCache = it }
+        }
+    }
+
+    /**
+     * Applies a new [ReaderStyleConfig] by writing its individual fields to [AppPrefs].
+     * The prefs flow back to [styleConfigFlow] which triggers re-pagination preserving
+     * the reading position.
+     */
+    fun applyStyleConfig(config: ReaderStyleConfig) {
+        viewModelScope.launch {
+            prefs.setFontScale(config.fontScale)
+            prefs.setLineSpacing(config.lineSpacing)
+            prefs.setParagraphSpacing(config.paragraphSpacingPx)
+            prefs.setLetterSpacing(config.letterSpacing)
+            prefs.setPageMargin(config.pageMarginPx)
+            prefs.setAlignment(
+                when (config.alignment) {
+                    androidx.compose.ui.text.style.TextAlign.Start -> "start"
+                    androidx.compose.ui.text.style.TextAlign.Center -> "center"
+                    androidx.compose.ui.text.style.TextAlign.End -> "end"
+                    androidx.compose.ui.text.style.TextAlign.Justify -> "justify"
+                    else -> "start"
+                }
+            )
+            prefs.setFirstLineIndent(config.firstLineIndentPx)
+            prefs.setFontFamily(config.fontFamily.storageKey)
+            prefs.setThemeMode(config.themeMode.storageKey)
+            prefs.setBrightness(config.brightness)
+            prefs.setPageAnimation(config.pageAnimation.storageKey)
+            prefs.setRtl(config.rtl)
+            prefs.setClickZones(com.example.reader.ui.theme.ClickZoneConfig.toKey(config.clickZones))
+            prefs.setTextureKey(config.textureKey)
         }
     }
 
