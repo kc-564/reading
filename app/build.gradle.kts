@@ -89,7 +89,16 @@ dependencies {
     // Encoding detection
     implementation("com.github.albfernandez:juniversalchardet:2.4.0")
 
+    // WiFi transfer (E02) — embedded HTTP server, pure Java
+    implementation("fi.iki.elonen:nanohttpd:2.3.1")
+
+    // Archive extraction — rar (D03, best-effort; zip uses JDK java.util.zip)
+    implementation("com.github.junrar:junrar:7.5.5")
+
     // Debug tooling
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // JVM unit tests (T27)
+    testImplementation("junit:junit:4.13.2")
 }

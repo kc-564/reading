@@ -1,0 +1,15 @@
+# block 1 — chinese heading
+第一章 风起青萍
+正文内容在此展开，叙述男主初入江湖的见闻与波折。
+
+# block 2 — english heading
+Chapter 5 The Storm
+The ship rocked as the crew struggled against the rising waves.
+
+# block 3 — numbered heading
+第12回 大战在即
+两军对垒，战鼓擂动，天地间只剩下铁与血的回响。
+
+# block 4 — volume heading
+Volume 7 The End
+After the long war, the survivors gathered to remember the fallen.

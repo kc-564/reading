@@ -7,12 +7,32 @@ import androidx.room.RoomDatabase
 
 /**
  * Room database for the reader app.
- * Version 2 adds books and reading_history tables (Phase 1).
+ *
+ * Version 2 (Phase 1): books + reading_history.
+ * Version 3 (Phase 2): + bookmarks, reading_sessions, toc_rule_prefs, highlights, layout_cache,
+ * and the `author`/`cover_uri`/`is_read` columns on books.
  */
-@Database(entities = [BookEntity::class, ReadingHistoryEntity::class], version = 2, exportSchema = false)
+@Database(
+    entities = [
+        BookEntity::class,
+        ReadingHistoryEntity::class,
+        BookmarkEntity::class,
+        ReadingSessionEntity::class,
+        TocRulePrefEntity::class,
+        HighlightEntity::class,
+        LayoutCacheEntity::class
+    ],
+    version = 3,
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun bookDao(): BookDao
     abstract fun readingHistoryDao(): ReadingHistoryDao
+    abstract fun bookmarkDao(): BookmarkDao
+    abstract fun statsDao(): StatsDao
+    abstract fun tocRulePrefDao(): TocRulePrefDao
+    abstract fun highlightDao(): HighlightDao
+    abstract fun layoutCacheDao(): LayoutCacheDao
 
     companion object {
         @Volatile
@@ -25,6 +45,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "reader.db"
                 )
+                    .addMigrations(MIGRATION_2_3)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }

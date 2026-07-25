@@ -1,0 +1,237 @@
+classDiagram
+    direction LR
+
+    class ReaderStyleConfig {
+        +float fontScale
+        +float lineSpacing
+        +int paragraphSpacingPx
+        +float letterSpacing
+        +int pageMarginPx
+        +TextAlign alignment
+        +int firstLineIndentPx
+        +FontFamilyKey fontFamily
+        +ThemeMode themeMode
+        +float brightness
+        +PageAnimationMode pageAnimation
+        +ReadingMode readingMode
+        +bool rtl
+        +ClickZoneConfig clickZones
+        +String textureKey
+        +TextStyle toTextStyle(Density) TextStyle
+        +String layoutHash() String
+    }
+
+    class ThemeMode {
+        <<enum>>
+        LIGHT
+        DARK
+        OLED_BLACK
+        PARCHMENT
+    }
+    class FontFamilyKey {
+        <<enum>>
+        DEFAULT
+        SANS
+        SERIF
+        MONOSPACE
+        CUSTOM
+    }
+    class PageAnimationMode {
+        <<enum>>
+        SMOOTH
+        NONE
+        FLIP3D
+    }
+    class ReadingMode {
+        <<enum>>
+        PAGED
+        SCROLLED
+    }
+    class ClickZoneConfig {
+        +Action top
+        +Action bottom
+        +Action left
+        +Action right
+        +Action center
+    }
+
+    ReaderStyleConfig --> ThemeMode
+    ReaderStyleConfig --> FontFamilyKey
+    ReaderStyleConfig --> PageAnimationMode
+    ReaderStyleConfig --> ReadingMode
+    ReaderStyleConfig --> ClickZoneConfig
+
+    class LayoutEngine {
+        -TextMeasurer measurer
+        +paginate(text, style, w, h, cfg) List~PageInfo~
+        -measureChunk(...) List~PageInfo~
+    }
+    class ParagraphSplitter {
+        +split(text) List~Paragraph~
+    }
+    class ReaderPagination {
+        +paginateBook(chapters, cfg, w, h) BookPagination
+        +globalPage(chapter, offset) Int
+        +globalPercent(...) Float
+    }
+    class BookPagination {
+        +List~ChapterPages~ chapters
+        +List~Int~ perChapterCounts
+        +int totalPages
+    }
+    class LayoutCache {
+        +get(key) List~PageInfo~?
+        +put(key, pages)
+        +String buildKey(fp, cfg, w, h) String
+    }
+
+    LayoutEngine ..> ParagraphSplitter : uses
+    ReaderPagination ..> LayoutEngine : uses
+    ReaderPagination ..> LayoutCache : hit/miss
+
+    class ReaderViewModel {
+        -ReaderPagination pagination
+        +uiState StateFlow~ReaderUiState~
+        +onStyleChanged(cfg)
+        +saveProgress(ci, off)
+        +search(q) List~SearchHit~
+        +addBookmark(...)
+    }
+    class ReaderUiState {
+        <<sealed>>
+    }
+    class Ready {
+        +List~Chapter~ chapters
+        +int currentChapterIndex
+        +int currentCharOffset
+        +long totalChars
+        +String encoding
+        +ReaderStyleConfig styleConfig
+        +List~Int~ perChapterPageCounts
+        +int totalPages
+        +int currentGlobalPage
+        +float globalPercent
+    }
+    ReaderUiState <|-- Ready
+    ReaderViewModel --> ReaderUiState
+    ReaderViewModel ..> ReaderPagination : holds
+
+    class BookEntity {
+        +String bookId
+        +String title
+        +String author
+        +String coverUri
+        +bool isRead
+        +String format
+        +long sizeBytes
+        +String encoding
+        +long lastOpenedAt
+        +float progressPercent
+        +int lastChapterIndex
+        +int lastCharOffset
+        +int totalChapters
+        +long totalChars
+    }
+    class BookmarkEntity {
+        +Long bookmarkId
+        +String bookId
+        +int chapterIndex
+        +int pageIndex
+        +int charOffset
+        +String previewText
+        +long createdAt
+    }
+    class ReadingSessionEntity {
+        +Long id
+        +String bookId
+        +long startedAt
+        +long endedAt
+        +int durationSec
+        +String dateKey
+    }
+    class TocRulePrefEntity {
+        +String bookId
+        +String ruleId
+        +bool enabled
+    }
+    class HighlightEntity {
+        +Long id
+        +String bookId
+        +int chapterIndex
+        +int startChar
+        +int endChar
+        +int colorArgb
+        +long createdAt
+    }
+    class LayoutCacheEntity {
+        +String cacheKey
+        +String bookId
+        +String pagesJson
+        +long createdAt
+    }
+
+    class BookRepository {
+        +getAllBooksFlow() Flow~List~BookEntity~~
+        +upsertBook(b)
+        +updateProgress(...)
+        +sortFilter(...)
+    }
+    class BookmarkRepository {
+        +addBookmark(b)
+        +removeBookmark(id)
+        +getBookmarks(bookId)
+    }
+    class StatsRepository {
+        +recordSession(s)
+        +aggregate(bookId, range)
+    }
+
+    BookRepository --> BookEntity
+    BookmarkRepository --> BookmarkEntity
+    StatsRepository --> ReadingSessionEntity
+
+    class TxtParser {
+        +parse(path, enc, enabledRules) List~Chapter~
+    }
+    class TocRules {
+        +List~TocRule~ all
+        +List~TocRule~ enabledFor(bookId, prefs)
+    }
+    class EncodingDetector {
+        +detect(path, def) Charset?
+    }
+    class FontManager {
+        +List~FontFamilyKey~ builtins
+        +List~ImportedFont~ imported
+        +FontFamily resolve(key) FontFamily
+    }
+    class WifiServer {
+        +start(port)
+        +stop()
+        +onUpload(cb)
+    }
+    class ImportManager {
+        +importUris(List~Uri~)
+        +importFolder(Uri)
+    }
+    class ArchiveExtractor {
+        +extract(zipOrRar) List~File~
+    }
+    class SearchEngine {
+        +search(chapters, q) List~SearchHit~
+    }
+    class ReadingStatsTracker {
+        +tick()
+        +flush()
+    }
+    class ClickZoneHandler {
+        +resolve(region) Action
+    }
+    class PageAnimation {
+        +apply(mode, pagerState) Modifier
+    }
+
+    TxtParser ..> TocRules : uses
+    ReaderViewModel ..> SearchEngine : uses
+    ImportManager ..> ArchiveExtractor : uses
+    ImportManager ..> EncodingDetector : uses

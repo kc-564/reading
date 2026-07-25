@@ -1,5 +1,7 @@
 package com.example.reader.ui.reader
 
+import com.example.reader.engine.GlobalPage
+import com.example.reader.engine.ReaderStyleConfig
 import com.example.reader.parser.Chapter
 
 /**
@@ -12,12 +14,27 @@ sealed interface ReaderUiState {
     /** An error occurred while loading the book. */
     data class Error(val message: String) : ReaderUiState
 
-    /** The book has been successfully loaded and is ready for reading. */
+    /**
+     * The book has been successfully loaded and is ready for reading.
+     *
+     * Pagination now spans the whole book: [globalPages] is a flat, cross-chapter list used
+     * directly by the pager; [totalPages]/[currentGlobalPage]/[globalPercent] describe the
+     * book-wide position. Changing layout parameters re-paginates but preserves
+     * [currentCharOffset] (so [currentGlobalPage] is recomputed, never reset to 0).
+     */
     data class Ready(
         val chapters: List<Chapter>,
         val currentChapterIndex: Int,
         val currentCharOffset: Int,
         val totalChars: Long,
-        val encoding: String
+        val encoding: String,
+        val styleConfig: ReaderStyleConfig,
+        val perChapterPageCounts: List<Int>,
+        val totalPages: Int,
+        val currentGlobalPage: Int,
+        val globalPercent: Float,
+        val globalPages: List<GlobalPage>,
+        /** Bumped every time pagination is (re)computed so the pager can re-target. */
+        val paginationVersion: Int = 0
     ) : ReaderUiState
 }

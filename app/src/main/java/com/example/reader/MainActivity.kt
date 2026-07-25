@@ -10,6 +10,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.reader.ui.reader.ReaderScreen
 import com.example.reader.ui.shelf.ShelfScreen
+import com.example.reader.ui.shelf.StatsScreen
+import com.example.reader.ui.shelf.WifiTransferScreen
 import com.example.reader.ui.theme.ReaderTheme
 
 class MainActivity : ComponentActivity() {
@@ -37,8 +39,16 @@ fun ReaderNavigation() {
             ShelfScreen(
                 onNavigateToReader = { bookPath ->
                     navController.navigate("reader/${java.net.URLEncoder.encode(bookPath, "UTF-8")}")
-                }
+                },
+                onNavigateToWifi = { navController.navigate("wifi") },
+                onNavigateToStats = { navController.navigate("stats") }
             )
+        }
+        composable("wifi") {
+            WifiTransferScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable("stats") {
+            StatsScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable("reader/{bookPath}") { backStackEntry ->
             val encodedPath = backStackEntry.arguments?.getString("bookPath") ?: ""

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>阅读器 · WiFi 传书</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+           max-width: 480px; margin: 48px auto; padding: 0 16px; color: #333; text-align: center; }
+    h2 { font-weight: 600; }
+    .drop { border: 2px dashed #bbb; border-radius: 12px; padding: 32px 16px; color: #777; }
+    input[type=file] { margin: 16px 0; }
+    button { background: #3b82f6; color: #fff; border: none; border-radius: 8px;
+             padding: 12px 28px; font-size: 16px; cursor: pointer; }
+    button:hover { background: #2563eb; }
+    .hint { font-size: 13px; color: #999; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h2>阅读器 · WiFi 传书</h2>
+  <p class="hint">支持 TXT / ZIP / RAR，可一次选择多个文件</p>
+  <form method="post" action="/" enctype="multipart/form-data">
+    <div class="drop">
+      <input type="file" name="file" multiple accept=".txt,.zip,.rar">
+    </div>
+    <button type="submit">上传并导入</button>
+  </form>
+  <p class="hint">上传完成后将自动解析并加入书架</p>
+</body>
+</html>

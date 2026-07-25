@@ -5,6 +5,7 @@ import com.example.reader.db.BookEntity
 import com.example.reader.db.ReadingHistoryEntity
 import com.example.reader.parser.Chapter
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 /**
  * Repository that mediates between the data layer (Room DB) and the rest of the app.
@@ -16,11 +17,33 @@ class BookRepository(private val db: AppDatabase) {
 
     // ── Books ──
 
+    /** All books ordered by last opened time (newest first). */
     fun getAllBooksFlow(): Flow<List<BookEntity>> = bookDao.getAllBooksFlow()
+
+    /** Books after applying a sort mode and a read/unread filter. */
+    fun getSortedBooksFlow(
+        sortMode: SortMode = SortMode.LAST_OPENED,
+        readFilter: ReadFilter = ReadFilter.ALL
+    ): Flow<List<BookEntity>> =
+        bookDao.getAllBooksFlow().map { list ->
+            val filtered = when (readFilter) {
+                ReadFilter.ALL -> list
+                ReadFilter.READ -> list.filter { it.isRead }
+                ReadFilter.UNREAD -> list.filter { !it.isRead }
+            }
+            when (sortMode) {
+                SortMode.LAST_OPENED -> filtered.sortedByDescending { it.lastOpenedAt }
+                SortMode.TITLE -> filtered.sortedBy { it.title.lowercase() }
+                SortMode.PROGRESS -> filtered.sortedByDescending { it.progressPercent }
+                SortMode.ADDED -> filtered.sortedByDescending { it.lastOpenedAt }
+            }
+        }
 
     suspend fun getBook(bookId: String): BookEntity? = bookDao.getBook(bookId)
 
     suspend fun upsertBook(book: BookEntity) = bookDao.upsertBook(book)
+
+    suspend fun upsertBooks(books: List<BookEntity>) = bookDao.upsertBooks(books)
 
     /**
      * Updates progress for a book.
@@ -37,9 +60,23 @@ class BookRepository(private val db: AppDatabase) {
         bookDao.updateProgress(bookId, openedAt, percent, chapterIndex, charOffset)
     }
 
+    suspend fun updateBookMeta(bookId: String, title: String, author: String?, coverUri: String?) {
+        bookDao.updateBookMeta(bookId, title, author, coverUri)
+    }
+
+    suspend fun setRead(bookId: String, isRead: Boolean) = bookDao.setRead(bookId, isRead)
+
+    suspend fun updateEncoding(bookId: String, encoding: String) =
+        bookDao.updateEncoding(bookId, encoding)
+
     suspend fun deleteBook(book: BookEntity) {
         bookDao.deleteBook(book)
         historyDao.deleteByBookId(book.bookId)
+    }
+
+    suspend fun deleteBookById(bookId: String) {
+        val book = bookDao.getBook(bookId) ?: return
+        deleteBook(book)
     }
 
     // ── Reading History ──
@@ -60,8 +97,6 @@ class BookRepository(private val db: AppDatabase) {
 
     /**
      * Calculates the cumulative reading percent across chapters.
-     *
-     * Formula: (sum of totalCharCount of chapters 0..chapterIndex-1 + charOffset) / totalChars
      */
     fun calculatePercent(
         chapterIndex: Int,
@@ -75,4 +110,24 @@ class BookRepository(private val db: AppDatabase) {
         return ((prevChars + charOffset).toFloat() / totalChars.toFloat())
             .coerceIn(0f, 1f)
     }
+
+    /** Sum of chapter char counts up to (but not including) [chapterIndex]. */
+    fun charsBeforeChapter(chapters: List<Chapter>, chapterIndex: Int): Long {
+        return (0 until chapterIndex.coerceIn(0, chapters.size))
+            .sumOf { chapters[it].totalCharCount.toLong() }
+    }
+}
+
+/**
+ * How the shelf sorts books.
+ */
+enum class SortMode {
+    LAST_OPENED, TITLE, PROGRESS, ADDED
+}
+
+/**
+ * Read/unread filter for the shelf.
+ */
+enum class ReadFilter {
+    ALL, READ, UNREAD
 }

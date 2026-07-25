@@ -6,6 +6,9 @@ import androidx.room.PrimaryKey
 
 /**
  * Room entity representing a book in the library.
+ *
+ * Phase 2 extends the schema with [author]/[coverUri]/[isRead] columns (added in
+ * migration 2 -> 3). They are nullable/optional so existing rows migrate cleanly.
  */
 @Entity(tableName = "books")
 data class BookEntity(
@@ -13,6 +16,9 @@ data class BookEntity(
     val filePath: String,
     val fileName: String,
     val title: String,
+    @ColumnInfo(name = "author") val author: String? = null,
+    @ColumnInfo(name = "cover_uri") val coverUri: String? = null,
+    @ColumnInfo(name = "is_read") val isRead: Boolean = false,
     @ColumnInfo(name = "format") val format: String,
     val sizeBytes: Long,
     val encoding: String,
