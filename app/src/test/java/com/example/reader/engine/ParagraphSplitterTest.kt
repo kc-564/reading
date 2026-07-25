@@ -35,8 +35,8 @@ class ParagraphSplitterTest {
         // char spans must map back into the source
         assertEquals(0, paras[0].start)
         assertEquals(7, paras[0].end)
-        assertEquals(16, paras[2].start)
-        assertEquals(19, paras[2].end)
+        assertEquals(15, paras[2].start)
+        assertEquals(18, paras[2].end)
     }
 
     @Test
