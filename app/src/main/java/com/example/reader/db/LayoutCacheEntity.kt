@@ -18,7 +18,7 @@ import androidx.room.PrimaryKey
  */
 @Entity(tableName = "layout_cache")
 data class LayoutCacheEntity(
-    @PrimaryKey val cacheKey: String,
+    @PrimaryKey @ColumnInfo(name = "cache_key") val cacheKey: String,
     @ColumnInfo(name = "book_id") val bookId: String,
     @ColumnInfo(name = "pages_json") val pagesJson: String,
     @ColumnInfo(name = "created_at") val createdAt: Long
