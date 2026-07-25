@@ -10,7 +10,7 @@ import com.example.reader.parser.TxtParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.nio.charset.Charsets
+import java.nio.charset.StandardCharsets
 
 /**
  * Batch book importer (D03 / C05).
@@ -33,7 +33,7 @@ class ImportManager(private val context: Context) {
             if (!file.exists() || file.isDirectory) continue
             val defaultPref = "UTF-8"
             val encoding = encodingCache.getOrPut(path, defaultPref) {
-                EncodingDetector.detect(path, defaultPref) ?: Charsets.UTF_8
+                EncodingDetector.detect(path, defaultPref) ?: StandardCharsets.UTF_8
             }
             val chapters = runCatching { parser.parse(path, encoding) }.getOrElse { emptyList() }
             val totalChars = chapters.sumOf { it.totalCharCount.toLong() }

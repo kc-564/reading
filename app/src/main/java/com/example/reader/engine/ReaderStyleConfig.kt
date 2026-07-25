@@ -11,6 +11,7 @@ import com.example.reader.ui.theme.FontFamilyKey
 import com.example.reader.ui.theme.PageAnimationMode
 import com.example.reader.ui.theme.ReadingMode
 import com.example.reader.ui.theme.ThemeMode
+import com.example.reader.ui.theme.toKey
 
 /**
  * Single source of truth for reader typography / layout parameters.

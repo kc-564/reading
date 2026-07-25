@@ -27,7 +27,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.IntSize
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -36,7 +36,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.roundToPx
+import androidx.compose.ui.draw.paint
+import androidx.compose.ui.input.key.KeyEvent
 import com.example.reader.R
 import com.example.reader.db.HighlightEntity
 import com.example.reader.engine.GlobalPage
@@ -101,8 +102,8 @@ fun ReaderContent(
     val boxSize = remember { mutableStateOf(IntSize.Zero) }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val maxWidthPx = with(density) { maxWidth.roundToPx() }
-        val maxHeightPx = with(density) { maxHeight.roundToPx() }
+        val maxWidthPx = with(density) { maxWidth.toPx().toInt() }
+        val maxHeightPx = with(density) { maxHeight.toPx().toInt() }
 
         // (Re)paginate when chapters / style / size change.
         LaunchedEffect(state.chapters, styleConfig, maxWidthPx, maxHeightPx) {
@@ -147,7 +148,7 @@ fun ReaderContent(
                 modifier = Modifier
                     .fillMaxSize()
                     .then(
-                        if (texturePainter != null) Modifier.background(texturePainter)
+                        if (texturePainter != null) Modifier.paint(texturePainter)
                         else Modifier.background(themeColors.background)
                     )
                     .onSizeChanged { boxSize.value = it }

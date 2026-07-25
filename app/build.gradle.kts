@@ -93,6 +93,9 @@ dependencies {
     // NOTE: Maven Central group is org.nanohttpd (Java package stays fi.iki.elonen.nanohttpd.*)
     implementation("org.nanohttpd:nanohttpd:2.3.1")
 
+    // DocumentFile (ImportDialog SAF)
+    implementation("androidx.documentfile:documentfile:1.0.1")
+
     // Archive extraction — rar (D03, best-effort; zip uses JDK java.util.zip)
     implementation("com.github.junrar:junrar:7.5.5")
 

@@ -183,6 +183,7 @@ private fun LabeledSlider(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun ChipRow(
     options: List<Pair<String, String>>,
     selected: String,
