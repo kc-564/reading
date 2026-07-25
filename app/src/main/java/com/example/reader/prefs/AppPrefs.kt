@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.reader.engine.ReaderStyleConfig
+import com.example.reader.parser.TocRules
 import com.example.reader.ui.theme.ClickZoneConfig
 import com.example.reader.ui.theme.FontFamilyKey
 import com.example.reader.ui.theme.PageAnimationMode
@@ -50,6 +51,9 @@ class AppPrefs(private val context: Context) {
         private val KEY_CLICK_ZONES = stringPreferencesKey("click_zones")
         private val KEY_TEXTURE_KEY = stringPreferencesKey("texture_key")
         private val KEY_IMPORTED_FONTS = stringPreferencesKey("imported_fonts")
+
+        // ── v1.1 keys ──
+        private val KEY_GLOBAL_TOC_RULES = stringPreferencesKey("global_toc_rules")
 
         const val DEFAULT_ENCODING = "UTF-8"
         const val DEFAULT_FONT_SCALE = 1.0f
@@ -226,6 +230,57 @@ class AppPrefs(private val context: Context) {
 
     suspend fun setImportedFonts(json: String) {
         context.dataStore.edit { prefs -> prefs[KEY_IMPORTED_FONTS] = json }
+    }
+
+    // ── v1.1 preferences ──
+
+    /**
+     * Global TOC rules stored as a JSON object string mapping ruleId -> enabled.
+     * Default: all built-in rules enabled.
+     */
+    val globalTocRules: Flow<Map<String, Boolean>> = context.dataStore.data.map { prefs ->
+        val raw = prefs[KEY_GLOBAL_TOC_RULES] ?: ""
+        if (raw.isBlank()) {
+            TocRules.ALL.associate { it.id to true }
+        } else {
+            runCatching {
+                @Suppress("UNCHECKED_CAST")
+                val map = org.json.JSONObject(raw)
+                val result = mutableMapOf<String, Boolean>()
+                val keys = map.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    result[key] = map.getBoolean(key)
+                }
+                result
+            }.getOrDefault(TocRules.ALL.associate { it.id to true })
+        }
+    }
+
+    /**
+     * Toggles a single TOC rule on/off. Reads the current map, updates the entry,
+     * and writes back as JSON.
+     */
+    suspend fun updateTocRule(ruleId: String, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            val raw = prefs[KEY_GLOBAL_TOC_RULES] ?: ""
+            val map = if (raw.isBlank()) {
+                TocRules.ALL.associate { it.id to true }.toMutableMap()
+            } else {
+                runCatching {
+                    val json = org.json.JSONObject(raw)
+                    val result = mutableMapOf<String, Boolean>()
+                    val keys = json.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        result[key] = json.getBoolean(key)
+                    }
+                    result
+                }.getOrDefault(TocRules.ALL.associate { it.id to true }.toMutableMap())
+            }
+            map[ruleId] = enabled
+            prefs[KEY_GLOBAL_TOC_RULES] = org.json.JSONObject(map).toString()
+        }
     }
 
     /**
