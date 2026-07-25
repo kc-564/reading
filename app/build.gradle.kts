@@ -89,8 +89,9 @@ dependencies {
     // Encoding detection
     implementation("com.github.albfernandez:juniversalchardet:2.4.0")
 
-    // WiFi transfer (E02) — embedded HTTP server, pure Java
-    implementation("fi.iki.elonen:nanohttpd:2.3.1")
+    // WiFi transfer (E02) — embedded HTTP server, pure Java.
+    // NOTE: Maven Central group is org.nanohttpd (Java package stays fi.iki.elonen.nanohttpd.*)
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
 
     // Archive extraction — rar (D03, best-effort; zip uses JDK java.util.zip)
     implementation("com.github.junrar:junrar:7.5.5")
