@@ -24,6 +24,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.reader.ui.profile.ProfileScreen
 import com.example.reader.ui.reader.ReaderScreen
 import com.example.reader.ui.settings.SettingsScreen
+import com.example.reader.ui.settings.TocRuleSettingsScreen
 import com.example.reader.ui.shelf.BookstorePlaceholder
 import com.example.reader.ui.shelf.ShelfScreen
 import com.example.reader.ui.shelf.StatsScreen
@@ -50,7 +51,7 @@ fun ReaderNavigation() {
     val currentRoute = navBackStackEntry?.destination?.route
 
     // Hide bottom bar on reader and other full-screen routes
-    val showBottomBar = currentRoute !in listOf("reader/{bookPath}", "wifi", "stats", "settings")
+    val showBottomBar = currentRoute !in listOf("reader/{bookPath}", "wifi", "stats", "settings", "tocrules")
 
     Scaffold(
         bottomBar = {
@@ -128,7 +129,15 @@ fun ReaderNavigation() {
                 StatsScreen(onNavigateBack = { navController.popBackStack() })
             }
             composable("settings") {
-                SettingsScreen(onNavigateBack = { navController.popBackStack() })
+                SettingsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToTocRules = { navController.navigate("tocrules") }
+                )
+            }
+            composable("tocrules") {
+                TocRuleSettingsScreen(
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
             composable("reader/{bookPath}") { backStackEntry ->
                 val encodedPath = backStackEntry.arguments?.getString("bookPath") ?: ""
