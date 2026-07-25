@@ -1,0 +1,4 @@
+# Body text sample files directory
+# Add one sample body text line per line to each .txt file in this directory.
+# Lines starting with # are treated as comments.
+# Empty lines are skipped.

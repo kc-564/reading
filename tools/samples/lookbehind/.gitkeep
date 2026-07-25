@@ -1,0 +1,4 @@
+# Lookbehind rule test samples directory
+# Add multi-line test blocks separated by blank lines.
+# Lines starting with # are treated as comments.
+# Each block is tested against all rules to verify lookbehind patterns.
