@@ -20,3 +20,7 @@ out/
 .navigation/
 *.log
 nul
+
+# 本地 CI 调试产物
+ci_poll.sh
+ci_run*_log.txt
