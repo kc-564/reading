@@ -19,3 +19,4 @@ gen/
 out/
 .navigation/
 *.log
+nul

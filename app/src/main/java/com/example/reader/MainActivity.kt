@@ -36,12 +36,13 @@ fun ReaderNavigation() {
         composable("shelf") {
             ShelfScreen(
                 onNavigateToReader = { bookPath ->
-                    navController.navigate("reader/$bookPath")
+                    navController.navigate("reader/${java.net.URLEncoder.encode(bookPath, "UTF-8")}")
                 }
             )
         }
         composable("reader/{bookPath}") { backStackEntry ->
-            val bookPath = backStackEntry.arguments?.getString("bookPath") ?: ""
+            val encodedPath = backStackEntry.arguments?.getString("bookPath") ?: ""
+            val bookPath = java.net.URLDecoder.decode(encodedPath, "UTF-8")
             ReaderScreen(
                 bookPath = bookPath,
                 onNavigateBack = {
