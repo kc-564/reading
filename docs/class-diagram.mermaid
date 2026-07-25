@@ -1,237 +1,179 @@
 classDiagram
-    direction LR
+    direction TB
 
-    class ReaderStyleConfig {
-        +float fontScale
-        +float lineSpacing
-        +int paragraphSpacingPx
-        +float letterSpacing
-        +int pageMarginPx
-        +TextAlign alignment
-        +int firstLineIndentPx
-        +FontFamilyKey fontFamily
-        +ThemeMode themeMode
-        +float brightness
-        +PageAnimationMode pageAnimation
-        +ReadingMode readingMode
-        +bool rtl
-        +ClickZoneConfig clickZones
-        +String textureKey
-        +TextStyle toTextStyle(Density) TextStyle
-        +String layoutHash() String
+    %% ── v1.1 新增 / 修改的核心类 ──
+
+    class EpubParser {
+        +parse(filePath, encoding) EpubParseResult
+        -parseContainer(zip) String
+        -parseOpf(zip, opfPath) EpubMetadata
+        -extractCover(zip, manifest, opfDir) ByteArray?
+        -parseSpine(zip, spine, manifest, opfDir) List~EpubChapter~
+        -stripHtml(html) String
+    }
+    class EpubMetadata {
+        +String title
+        +String? author
+        +String? coverImagePath
+        +ByteArray? coverImageBytes
+    }
+    class EpubChapter {
+        +String title
+        +String content
+        +int charCount
+    }
+    class EpubParseResult {
+        +EpubMetadata metadata
+        +List~EpubChapter~ chapters
     }
 
-    class ThemeMode {
+    EpubParser ..> EpubParseResult : returns
+    EpubParseResult --> EpubMetadata
+    EpubParseResult --> EpubChapter
+
+    %% ── 导入系统（v1.1 扩展）──
+
+    class ImportManager {
+        -Context context
+        -BookRepository repository
+        -TxtParser txtParser
+        -EpubParser epubParser
+        +importFiles(paths) Int
+        +importArchives(paths) Int
+        -importTxt(path, encoding) BookEntity
+        -importEpub(path, encoding) BookEntity
+        -saveCoverImage(bookId, bytes) String
+    }
+    class ArchiveExtractor {
+        +extract(paths) List~String~
+        -extractZip(file, out)
+        -extractRar(file, out)
+    }
+    class ImportDialog {
+        +onDismiss()
+        +onImported(count)
+        -copyUriToCache(context, uri) String?
+        -collectTreePaths(context, treeUri) List~String~
+        -showProgress(visible)
+    }
+
+    ImportManager --> EpubParser : uses
+    ImportManager ..> ArchiveExtractor : uses
+    ImportDialog ..> ImportManager : calls
+
+    %% ── 阅读器面板（v1.1 重构）──
+
+    class ReaderScreen {
+        -isPanelVisible Boolean
+        -togglePanel()
+        +ReaderScreen(bookPath, onNavigateBack)
+    }
+    class ReaderTopBar {
+        +bookTitle String
+        +onBack() Unit
+        +onSearch() Unit
+        +onBookmark() Unit
+        +overflowMenuExpanded Boolean
+    }
+    class ReaderBottomBar {
+        +chapterTitle String
+        +onSunMenu() Unit
+        +onPrevChapter() Unit
+        +onNextChapter() Unit
+        +onTypography() Unit
+        +sunMenuExpanded Boolean
+        +showTypographySheet Boolean
+    }
+    class ReaderContent {
+        +state ReaderUiState.Ready
+        +pagerState PagerState
+        +styleConfig ReaderStyleConfig
+        +onPanelToggle() Unit
+        +isPanelVisible Boolean
+    }
+
+    ReaderScreen --> ReaderTopBar : contains
+    ReaderScreen --> ReaderBottomBar : contains
+    ReaderScreen --> ReaderContent : contains
+
+    %% ── 导航（v1.1 重构）──
+
+    class MainActivity {
+        +onCreate(savedInstanceState)
+        +ReaderNavigation()
+        -currentTab Tab
+    }
+    class Tab {
         <<enum>>
-        LIGHT
-        DARK
-        OLED_BLACK
-        PARCHMENT
-    }
-    class FontFamilyKey {
-        <<enum>>
-        DEFAULT
-        SANS
-        SERIF
-        MONOSPACE
-        CUSTOM
-    }
-    class PageAnimationMode {
-        <<enum>>
-        SMOOTH
-        NONE
-        FLIP3D
-    }
-    class ReadingMode {
-        <<enum>>
-        PAGED
-        SCROLLED
-    }
-    class ClickZoneConfig {
-        +Action top
-        +Action bottom
-        +Action left
-        +Action right
-        +Action center
+        SHELF
+        BOOKSTORE
+        PROFILE
     }
 
-    ReaderStyleConfig --> ThemeMode
-    ReaderStyleConfig --> FontFamilyKey
-    ReaderStyleConfig --> PageAnimationMode
-    ReaderStyleConfig --> ReadingMode
-    ReaderStyleConfig --> ClickZoneConfig
+    %% ── 新页面（v1.1 新增）──
 
-    class LayoutEngine {
-        -TextMeasurer measurer
-        +paginate(text, style, w, h, cfg) List~PageInfo~
-        -measureChunk(...) List~PageInfo~
+    class ProfileScreen {
+        +recentBooks List~BookEntity~
+        +onNavigateToReader(bookPath)
+        +onNavigateToStats()
+        +onNavigateToSettings()
     }
-    class ParagraphSplitter {
-        +split(text) List~Paragraph~
+    class SettingsScreen {
+        +themeMode String
+        +defaultFont String
+        +onNavigateToTocRules()
+        +onBack()
     }
-    class ReaderPagination {
-        +paginateBook(chapters, cfg, w, h) BookPagination
-        +globalPage(chapter, offset) Int
-        +globalPercent(...) Float
+    class TocRuleSettingsScreen {
+        +enabledRules Set~String~
+        +onToggleRule(ruleId, enabled)
+        +onBack()
     }
-    class BookPagination {
-        +List~ChapterPages~ chapters
-        +List~Int~ perChapterCounts
-        +int totalPages
-    }
-    class LayoutCache {
-        +get(key) List~PageInfo~?
-        +put(key, pages)
-        +String buildKey(fp, cfg, w, h) String
+    class BookStoreScreen {
     }
 
-    LayoutEngine ..> ParagraphSplitter : uses
-    ReaderPagination ..> LayoutEngine : uses
-    ReaderPagination ..> LayoutCache : hit/miss
+    %% ── 数据层（v1.1 扩展）──
 
-    class ReaderViewModel {
-        -ReaderPagination pagination
-        +uiState StateFlow~ReaderUiState~
-        +onStyleChanged(cfg)
-        +saveProgress(ci, off)
-        +search(q) List~SearchHit~
-        +addBookmark(...)
+    class ReadingHistoryDao {
+        +getRecentHistoryFlow() Flow~List~
+        +getDedupedRecentFlow() Flow~List~
+        +upsertHistory(history)
+        +deleteByBookId(bookId)
     }
-    class ReaderUiState {
-        <<sealed>>
+    class BookRepository {
+        +getDedupedRecentHistoryFlow() Flow~List~
+        +saveCoverImage(context, bookId, bytes) String
     }
-    class Ready {
-        +List~Chapter~ chapters
-        +int currentChapterIndex
-        +int currentCharOffset
-        +long totalChars
-        +String encoding
-        +ReaderStyleConfig styleConfig
-        +List~Int~ perChapterPageCounts
-        +int totalPages
-        +int currentGlobalPage
-        +float globalPercent
+    class AppPrefs {
+        +globalTocRules Flow~Set~String~~
+        +setGlobalTocRules(rules)
+        +defaultFont Flow~String~
+        +setDefaultFont(key)
     }
-    ReaderUiState <|-- Ready
-    ReaderViewModel --> ReaderUiState
-    ReaderViewModel ..> ReaderPagination : holds
-
     class BookEntity {
         +String bookId
         +String title
-        +String author
-        +String coverUri
-        +bool isRead
+        +String? coverUri
         +String format
-        +long sizeBytes
-        +String encoding
-        +long lastOpenedAt
-        +float progressPercent
-        +int lastChapterIndex
-        +int lastCharOffset
-        +int totalChapters
-        +long totalChars
-    }
-    class BookmarkEntity {
-        +Long bookmarkId
-        +String bookId
-        +int chapterIndex
-        +int pageIndex
-        +int charOffset
-        +String previewText
-        +long createdAt
-    }
-    class ReadingSessionEntity {
-        +Long id
-        +String bookId
-        +long startedAt
-        +long endedAt
-        +int durationSec
-        +String dateKey
-    }
-    class TocRulePrefEntity {
-        +String bookId
-        +String ruleId
-        +bool enabled
-    }
-    class HighlightEntity {
-        +Long id
-        +String bookId
-        +int chapterIndex
-        +int startChar
-        +int endChar
-        +int colorArgb
-        +long createdAt
-    }
-    class LayoutCacheEntity {
-        +String cacheKey
-        +String bookId
-        +String pagesJson
-        +long createdAt
     }
 
-    class BookRepository {
-        +getAllBooksFlow() Flow~List~BookEntity~~
-        +upsertBook(b)
-        +updateProgress(...)
-        +sortFilter(...)
-    }
-    class BookmarkRepository {
-        +addBookmark(b)
-        +removeBookmark(id)
-        +getBookmarks(bookId)
-    }
-    class StatsRepository {
-        +recordSession(s)
-        +aggregate(bookId, range)
+    BookRepository --> ReadingHistoryDao : uses
+    ProfileScreen ..> BookRepository : reads
+    TocRuleSettingsScreen ..> AppPrefs : reads/writes
+
+    %% ── TOC 迁移（v1.1）──
+
+    class TocDrawer {
+        +chapters List~Chapter~
+        +currentChapterIndex Int
+        +onChapterClick(idx)
     }
 
-    BookRepository --> BookEntity
-    BookmarkRepository --> BookmarkEntity
-    StatsRepository --> ReadingSessionEntity
+    %% ── 关系 ──
 
-    class TxtParser {
-        +parse(path, enc, enabledRules) List~Chapter~
-    }
-    class TocRules {
-        +List~TocRule~ all
-        +List~TocRule~ enabledFor(bookId, prefs)
-    }
-    class EncodingDetector {
-        +detect(path, def) Charset?
-    }
-    class FontManager {
-        +List~FontFamilyKey~ builtins
-        +List~ImportedFont~ imported
-        +FontFamily resolve(key) FontFamily
-    }
-    class WifiServer {
-        +start(port)
-        +stop()
-        +onUpload(cb)
-    }
-    class ImportManager {
-        +importUris(List~Uri~)
-        +importFolder(Uri)
-    }
-    class ArchiveExtractor {
-        +extract(zipOrRar) List~File~
-    }
-    class SearchEngine {
-        +search(chapters, q) List~SearchHit~
-    }
-    class ReadingStatsTracker {
-        +tick()
-        +flush()
-    }
-    class ClickZoneHandler {
-        +resolve(region) Action
-    }
-    class PageAnimation {
-        +apply(mode, pagerState) Modifier
-    }
-
-    TxtParser ..> TocRules : uses
-    ReaderViewModel ..> SearchEngine : uses
-    ImportManager ..> ArchiveExtractor : uses
-    ImportManager ..> EncodingDetector : uses
+    MainActivity --> Tab : uses
+    MainActivity --> ProfileScreen : hosts
+    MainActivity --> SettingsScreen : hosts
+    MainActivity --> BookStoreScreen : hosts
+    SettingsScreen --> TocRuleSettingsScreen : navigates to
+    ProfileScreen --> SettingsScreen : navigates to
