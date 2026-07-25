@@ -1,346 +1,451 @@
-# 阅读器 App 增量架构设计 + 任务分解（Phase 2–5 + F04 调研）
+# 阅读器 App v1.1 增量架构设计 + 任务分解
 
 > 包名 `com.example.reader`，源码根 `app/src/main/java/com/example/reader/`
-> 技术栈：Kotlin 1.9.22 · Compose BOM 2023.10.01（foundation 1.5.4）· Material3 · Room 2.6.1 · Navigation Compose 2.7.5 · DataStore 1.0.0 · juniversalchardet 2.4.0 · KSP
-> compileSdk/targetSdk 34，minSdk 26。**本机无 Android SDK，所有编译靠 CI `assembleDebug` 验证**，因此下文所有 API 均限定在 BOM 2023.10.01 之内（`HorizontalPager` 位于 `androidx.compose.foundation.pager`，可用）。
-> 本设计在 Phase 0/1 已交付代码之上**增量扩展，不推翻**。
+> 技术栈：Kotlin 1.9.22 · Compose BOM 2023.10.01（Compose 1.5.4）· Material3 1.1.2 · Room 2.6.1 · Navigation Compose 2.7.5 · DataStore 1.0.0
+> compileSdk/targetSdk 34，minSdk 26。**当前 72 源文件，CI 全绿**。
+> 本设计在既有 Phase 0–5 已交付代码之上**增量扩展，不推翻**。
 
 ---
 
-## 1. 实现方案与框架选型
+## Part A: 系统设计
 
-### 1.1 核心技术难点
-1. **排版引擎增强**：需支持字号缩放(1×–3×)、精确像素段距、字间距/对齐/首行缩进、章首页标题高度预留、超大章节分块测量、翻页/滚动双模式、RTL；且**测量样式与渲染样式必须完全一致**，避免换字体/字号后行断点错位（D06/D08/C02）。
-2. **跨章全书级进度**：总页数 / 当前跨章页 / 全书百分比；改参数重排时进度保持不跳开头（C01/C07）。
-3. **布局缓存 key**：`文件指纹 + 排版参数 + 屏幕尺寸`，命中即跳过整本测量（C07）。
-4. **多主题**：白天/夜间/OLED 纯黑/羊皮纸，状态栏与阅读区配色随之变化（C03）。
-5. **无本机编译**：代码须在指定依赖组合下编译通过。
+### 1. 实现方案
 
-### 1.2 框架 / 库选型
-| 模块 | 选型 | 说明 |
+**一句话**：重构 MainActivity 为 BottomNavigation 三板块架构，阅读器面板改为可收起+功能重组，新增 EpubParser（轻量），个人/设置页从零新建，TOC 规则从阅读页迁入设置。
+
+#### 1.1 核心技术难点
+
+| 难点 | 分析 |
+|------|------|
+| **底部导航嵌套路由** | 书架/书城/个人三 Tab 各自有独立回退栈，阅读页在底部导航之外全屏展示。需用嵌套 NavHost 或路由状态管理 |
+| **阅读面板动画** | 默认隐藏 TopAppBar + BottomBar，点击屏幕中间区域弹出，需 `AnimatedVisibility` + 点击手势冲突处理（与现有 ClickZone 翻页不冲突） |
+| **EPUB 轻量解析** | 约束：不加 epublib 等重依赖。只用 `java.util.zip.ZipFile` + `XmlPullParser`。需处理 container.xml → OPF → metadata/manifest/spine，HTML 文本提取 |
+| **封面处理** | EPUB 封面从 manifest 提取 → 存到 `filesDir/cover/{bookId}.png`；无封面→默认占位 drawable |
+| **TOC 规则迁移** | 从 per-book Room 表 → 全局 DataStore 键（或 Room 全局行），阅读页不再显示规则开关 |
+| **最近阅读去重** | 同一 bookId 连续出现合并为一条（取最新 openedAt），SQL 层或 Repository 层处理 |
+
+#### 1.2 框架选型（新增依赖）
+
+| 场景 | 选型 | 说明 |
 |------|------|------|
-| 排版 | 继续用 Compose `TextMeasurer`（`rememberTextMeasurer`）+ 自研段落级测量 | **不引入三方排版库** |
-| 字体导入 | Android `Typeface.Builder(path)` + Compose `Font(Typeface)` | **无需新依赖** |
-| 翻页动画 | Compose 原生：`graphicsLayer` `rotationY` 做 3D 翻转近似、pager 默认滑动、snap 无动画 | **不引入三方库**（落实 E03 拍板）|
-| 压缩包 | zip 用 JDK `java.util.zip`（内置）；rar 用 `com.github.anjoze:junrar`（best-effort，见风险）| D03 |
-| WiFi 传书 | `fi.iki.elonen:nanohttpd`（内嵌 HTTP Server，纯 Java，Android 兼容）| E02 |
-| 封面/纹理 | 本地文件用 `ImageBitmap`/`painterResource`；可选引 `io.coil-kt:coil-compose` 简化 Uri 加载 | F02/F05，标注可选 |
-| 测试 | JVM 单元测试 `junit:junit:4.13.2`（纯逻辑：TocRules / EncodingDetector / ParagraphSplitter）| 无需 Robolectric/设备；CI 加 `testDebugUnitTest` |
+| EPUB 解析 | `java.util.zip.ZipFile` + `org.xmlpull.v1.XmlPullParser`（Android SDK 内置） | **零新增依赖** |
+| HTML→纯文本 | 简单正则 `<[^>]*>` + `Html.fromHtml()` 备选 | 零新增依赖 |
+| 面板动画 | Compose `AnimatedVisibility`（material3 已依赖） | 零新增依赖 |
+| 底部导航 | Material3 `NavigationBar` + `NavigationBarItem`（material3 已依赖） | 零新增依赖 |
+| 封面加载 | 现有 `ImageBitmap`/`painterResource` 方案 | 零新增依赖 |
 
-### 1.3 架构模式
-- **MVVM 维持**：将"分页"从 Composable `remember` 上提到 `ReaderPagination` 用例（在 ViewModel 中持有），便于跨章进度、缓存、渐进排版与重排。
-- **单一数据源**：`ReaderStyleConfig` → `toTextStyle(density)` 产出**唯一** `TextStyle` 供测量与渲染共用，杜绝断点错位。
-- **阅读参数持久化**：全部经 `AppPrefs`（DataStore），改动实时 `Flow` 下发到 ViewModel 触发重排。
-- **阅读工具 UI 全底部**：底部 `BottomAppBar`/`ModalBottomSheet` 从底部展开；TOC 用 `ModalNavigationDrawer` 左侧抽屉。
-- **数据层**：Room + Repository；新增 `BookmarkRepository`/`StatsRepository`。
+**本期无新增 gradle 依赖。** 所有能力均基于现有依赖实现。
+
+#### 1.3 架构模式
+
+- **MVVM 维持**：不改变现有分层。新增 ProfileScreen/SettingsScreen 均使用独立 ViewModel 或复用 ShelfViewModel。
+- **导航重构**：`MainActivity` 的 `Scaffold` 顶部放 NavHost（书架/书城/个人），底部放 `NavigationBar`；阅读页路由在 NavHost 外单独处理（全屏覆盖）。
+- **阅读面板**：`ReaderScreen` 内部状态 `isPanelVisible = false`，点击 ReaderContent 中间区域→toggle；`AnimatedVisibility` 包裹 TopAppBar + BottomBar。
+- **TOC 规则全局化**：从 Room `toc_rule_prefs`（per-bookId）→ DataStore `KEY_GLOBAL_TOC_RULES`（JSON 字符串），TocRuleSettingsScreen 编辑。
 
 ---
 
-## 2. 文件列表（按模块，新增 / 修改）
+### 2. 文件变更清单
 
-> 路径均相对 `app/src/main/java/com/example/reader/`（res 单独标注）。`[新]`=新增，`[改]`=修改。
+> 路径均相对 `app/src/main/java/com/example/reader/`，res 单独标注。`[新]`=新建，`[改]`=修改。
 
-### 2.1 engine（排版引擎增强）
+#### 2.1 导航（Navigation）
 | 文件 | 动作 | 说明 |
 |------|------|------|
-| `engine/LayoutEngine.kt` | [改] | 改为段落测量 + 段距像素注入；接收 `ReaderStyleConfig`；分块测量；章首页标题高度预留 |
-| `engine/LayoutResult.kt` | [改] | `PageInfo` 增加 `chapterIndex/paragraphIndex`；新增 `LayoutPage`/`BookPagination` |
-| `engine/ReaderStyleConfig.kt` | [新] | 排版参数数据类 + `toTextStyle()` + `layoutHash()` |
-| `engine/ReaderPagination.kt` | [新] | 全书级分页、跨章页映射、`globalPercent` 计算、渐进排版、缓存命中 |
-| `engine/LayoutCache.kt` | [新] | 排版缓存读写（调用 `LayoutCacheRepository`）|
-| `util/ParagraphSplitter.kt` | [新] | 按"空白行"切段落，连续空行去重 |
+| `MainActivity.kt` | [改] | Scaffold + NavigationBar（书架/书城/个人）+ NavHost（reader 路由全屏覆盖） |
+| `app/build.gradle.kts` | [改] | 验证依赖（本期无新增，但需确认 material-icons-extended 存在） |
 
-### 2.2 db（数据层）
+#### 2.2 书架（Shelf）
 | 文件 | 动作 | 说明 |
 |------|------|------|
-| `db/AppDatabase.kt` | [改] | version 2→3，注册新实体/DAO |
-| `db/BookEntity.kt` | [改] | 增加 `author/coverUri/isRead` 列 |
-| `db/BookDao.kt` | [改] | 增加排序/筛选查询、按格式/已读筛选 |
-| `db/BookmarkEntity.kt` | [新] | 书签实体 |
-| `db/BookmarkDao.kt` | [新] | 书签增删查 |
-| `db/ReadingSessionEntity.kt` | [新] | 阅读时长会话（F07）|
-| `db/StatsDao.kt` | [新] | 统计聚合查询 |
-| `db/TocRulePrefEntity.kt` | [新] | 每本书 TOC 规则开关（E05）|
-| `db/TocRulePrefDao.kt` | [新] | 规则开关读写 |
-| `db/HighlightEntity.kt` | [新] | 高亮/划线（F06）|
-| `db/HighlightDao.kt` | [新] | 高亮读写 |
-| `db/LayoutCacheEntity.kt` | [新] | 排版缓存表（C07）|
-| `db/LayoutCacheDao.kt` | [新] | 缓存读写 |
-| `db/Migrations.kt` | [新] | Migration(2→3)，保留历史、`fallbackToDestructiveMigration` 兜底 |
+| `ui/shelf/ShelfScreen.kt` | [改] | 移除 TopAppBar 的 Wifi/Stats 图标按钮（导航移至底部和个人页）；保留导入 FAB |
+| `ui/shelf/ShelfViewModel.kt` | [改] | `recentHistory` 保留但个人页自己查询去重版本；书架页不再显示最近阅读 section |
+| `ui/shelf/BookCover.kt` | [改] | 无 `coverUri` 时显示默认占位 drawable（`R.drawable.ic_default_cover`） |
 
-### 2.3 data（Repository）
+#### 2.3 书城（BookStore — P2 占位）
 | 文件 | 动作 | 说明 |
 |------|------|------|
-| `data/BookRepository.kt` | [改] | 增加排序/筛选/编码批量接口 |
-| `data/BookmarkRepository.kt` | [新] | 书签仓储 |
-| `data/StatsRepository.kt` | [新] | 阅读统计仓储 |
+| `ui/bookstore/BookStoreScreen.kt` | [新] | 纯占位："即将推出" |
 
-### 2.4 prefs（偏好）
+#### 2.4 个人（Profile — P1）
 | 文件 | 动作 | 说明 |
 |------|------|------|
-| `prefs/AppPrefs.kt` | [改] | 新增 key：`font_family, alignment, paragraph_spacing, letter_spacing, first_line_indent, reading_mode, page_animation, rtl, click_zones, texture_key, imported_fonts`；复用既有 `font_scale/line_spacing/page_margin/theme_mode/brightness` |
+| `ui/profile/ProfileScreen.kt` | [新] | 最近阅读 LazyRow（去重）+ 阅读统计入口 + 设置入口 |
 
-### 2.5 parser（解析）
+#### 2.5 设置（Settings — P1）
 | 文件 | 动作 | 说明 |
 |------|------|------|
-| `parser/TxtParser.kt` | [改] | `parse(path, enc, enabledRules)` 接收启用规则集合 |
-| `parser/TocRules.kt` | [新] | 章节规则集（整行锚定、优先级、负向过滤），可被 Python 验证脚本对齐 |
-| `parser/EncodingDetector.kt` | [改] | C05：补充 BIG5 / GB18030 候选与解码合法性校验 |
-| `parser/LruEncodingCache.kt` | [改] | LRU 优化（按文件大小预算淘汰）|
+| `ui/settings/SettingsScreen.kt` | [新] | 主题模式选择 / 默认字体选择 / 目录规则入口 / 关于 |
+| `ui/settings/TocRuleSettingsScreen.kt` | [新] | 全局 TOC 规则开关页面（从 TocDrawer 迁移） |
 
-### 2.6 ui/theme（主题）
+#### 2.6 阅读器面板（Reader — P0）
 | 文件 | 动作 | 说明 |
 |------|------|------|
-| `ui/theme/Color.kt` | [改] | 增加 DARK / OLED_BLACK / PARCHMENT 调色板 |
-| `ui/theme/Theme.kt` | [改] | 按 `ThemeMode` 选 scheme；状态栏颜色随主题 |
-| `ui/theme/ThemeDefs.kt` | [新] | 枚举：`ThemeMode/FontFamilyKey/PageAnimationMode/ReadingMode` + `ClickZoneConfig` |
-| `ui/theme/ReaderThemeColors.kt` | [新] | 每主题阅读区背景/正文色 |
+| `ui/reader/ReaderScreen.kt` | [改] | 引入 `isPanelVisible` 状态 + `AnimatedVisibility`；去掉旧 Scaffold topBar/bottomBar，改用 Column 布局 |
+| `ui/reader/ReaderTopBar.kt` | [新] | 返回键 + 书名 + 右侧溢出菜单（搜索🔍、书签🔖） |
+| `ui/reader/ReaderBottomBar.kt` | [新] | 太阳图标☀（亮度/背景色/日夜模式弹出菜单）+ 章节导航（◀ T ▸）+ 排版键（字号/边距/对齐/字体弹出） |
+| `ui/reader/ReaderContent.kt` | [改] | 点击中间区域 toggle `onPanelToggle`；与 ClickZoneHandler 协调（面板可见时不触发翻页） |
+| `ui/reader/ReaderToolbar.kt` | [改] | 废弃旧 5 按钮布局；功能迁移到 ReaderTopBar + ReaderBottomBar |
+| `ui/reader/SettingsSheet.kt` | [改] | 可能需要微调（部分设置项在底部排版键和太阳菜单中已有快捷入口） |
 
-### 2.7 ui/reader（阅读页）
+#### 2.7 阅读器 TOC（Reader TOC — P1）
 | 文件 | 动作 | 说明 |
 |------|------|------|
-| `ui/reader/ReaderScreen.kt` | [改] | 接入底部工具条、TOC 抽屉、书签/搜索/设置 sheet；音量键；RTL |
-| `ui/reader/ReaderContent.kt` | [改] | 应用 styleConfig 渲染、主题色、段距、对齐、RTL、点击区、动画 |
-| `ui/reader/ReaderPage.kt` | [改] | 用统一 `TextStyle` 渲染 + 主题色；高亮/选择（F06）；无障碍语义 |
-| `ui/reader/ReaderUiState.kt` | [改] | `Ready` 增加 `styleConfig/perChapterPageCounts/totalPages/currentGlobalPage/globalPercent` |
-| `ui/reader/ReaderViewModel.kt` | [改] | 持有 `ReaderPagination`；改参数重排保持进度；搜索/书签/统计心跳 |
-| `ui/reader/ReaderStatusBar.kt` | [新] | 底部状态栏（章节名/全书页码/百分比）|
-| `ui/reader/ReaderToolbar.kt` | [新] | 底部工具条（目录/主题/字体/书签/搜索/设置入口）|
-| `ui/reader/SettingsSheet.kt` | [新] | 底部弹窗：字号/行距/段距/字距/边距/对齐/主题/动画/字体/点击区/纹理 |
-| `ui/reader/TocDrawer.kt` | [新] | 左侧抽屉目录 + 规则开关（E05）|
-| `ui/reader/BookmarkSheet.kt` | [新] | 书签列表/增删 |
-| `ui/reader/SearchSheet.kt` | [新] | 全文搜索结果 + 跳转 |
-| `ui/reader/HighlightSheet.kt` | [新] | 高亮列表/颜色 |
+| `ui/reader/TocDrawer.kt` | [改] | 移除底部"章节识别规则"Switch 区域（迁移到设置→目录） |
 
-### 2.8 ui/shelf（书架）
+#### 2.8 EPUB 解析（Parser — P0）
 | 文件 | 动作 | 说明 |
 |------|------|------|
-| `ui/shelf/ShelfScreen.kt` | [改] | 排序/筛选条、封面 3:4 + 书名常显、导入入口、WiFi 入口、统计入口 |
-| `ui/shelf/ShelfViewModel.kt` | [改] | 排序/筛选状态；导入/统计 |
-| `ui/shelf/SortFilterBar.kt` | [新] | 排序与筛选控件 |
-| `ui/shelf/BookCover.kt` | [新] | 3:4 封面（无封面时按书名生成占位）|
-| `ui/shelf/ImportDialog.kt` | [新] | 多文件/文件夹/压缩包选择 |
-| `ui/shelf/BookMetaEditor.kt` | [新] | 编辑书名/作者/封面（F05）|
-| `ui/shelf/StatsScreen.kt` | [新] | 阅读统计页（F07）|
+| `parser/EpubParser.kt` | [新] | ZIP + XmlPullParser：解析 container.xml→OPF→metadata/manifest/spine，提取章节和封面 |
+| `feature/import/ImportManager.kt` | [改] | 按扩展名路由：`.txt`→TxtParser，`.epub`→EpubParser；封面提取 + 保存到 filesDir；异步导入 |
+| `feature/import/ArchiveExtractor.kt` | [改] | 加入 `.epub` 到识别扩展名列表（epub 不解压，直接传路径给 EpubParser） |
+| `ui/shelf/ImportDialog.kt` | [改] | 文件选择器加入 `application/epub+zip` MIME；导入进度 Snackbar/Indicator |
 
-### 2.9 feature（功能模块）
+#### 2.9 数据层（DB / Prefs — P1）
 | 文件 | 动作 | 说明 |
 |------|------|------|
-| `feature/fonts/FontManager.kt` | [新] | 内置字族映射 + 导入 TTF/OTF 解析（D04）|
-| `feature/import/ImportManager.kt` | [新] | 批量导入、SAF 多选/文件夹（D03）|
-| `feature/import/ArchiveExtractor.kt` | [新] | zip/rar 解压 |
-| `feature/search/SearchEngine.kt` | [新] | 章节级线性搜索 + 上下文（D02）|
-| `feature/stats/ReadingStatsTracker.kt` | [新] | 前台时长采样 + 心跳（F07）|
-| `feature/clickzone/ClickZoneHandler.kt` | [新] | 四区域点击/滑动映射（E01）|
-| `feature/animation/PageAnimation.kt` | [新] | 平滑/无/3D 翻转近似（E03）|
-| `feature/wifi/WifiServer.kt` | [新] | nanohttpd 内嵌服务（E02）|
-| `feature/wifi/WifiTransferViewModel.kt` | [新] | WiFi 传书 VM |
-| `feature/wifi/WifiTransferScreen.kt` | [新] | WiFi 传书页 |
-| `feature/export/ExportManager.kt` | [新] | 导出/分享 TXT/图片（F03）|
-| `feature/highlight/HighlightManager.kt` | [新] | 高亮管理（F06）|
+| `db/ReadingHistoryDao.kt` | [改] | 新增 `getDedupedRecentFlow()` — 连续同书去重查询 |
+| `data/BookRepository.kt` | [改] | 新增 `getDedupedRecentHistoryFlow()` + `saveCoverImage()` |
+| `prefs/AppPrefs.kt` | [改] | 新增 `KEY_GLOBAL_TOC_RULES`（String，JSON 数组）+ `KEY_DEFAULT_FONT`（String） |
 
-### 2.10 res 资源
+#### 2.10 资源（Res）
 | 文件 | 动作 | 说明 |
 |------|------|------|
-| `res/raw/wifi_upload.html` | [新] | WiFi 上传页 |
-| `res/drawable/texture_wood.xml` `texture_linen.xml` `texture_paper.xml` | [新] | 背景纹理（F02）|
-| `res/drawable/ic_book_placeholder.xml` | [新] | 无封面占位 |
-| `res/values/strings.xml` | [改] | 新增大量文案 |
-| `res/values/themes.xml` | [改] | 适配边缘到边缘/状态栏 |
-
-### 2.11 测试 / CI / 文档
-| 文件 | 动作 | 说明 |
-|------|------|------|
-| `app/src/test/java/.../parser/TocRulesTest.kt` | [新] | 规则命中/负向过滤（JVM）|
-| `app/src/test/java/.../parser/EncodingDetectorTest.kt` | [新] | BIG5/GBK/UTF-8（JVM，样本在 `tools/samples`）|
-| `app/src/test/java/.../engine/ParagraphSplitterTest.kt` | [新] | 段落切分（JVM）|
-| `app/src/test/resources/samples/*.txt` | [新] | 测试样本 |
-| `.github/workflows/ci.yml` | [改] | 增加 `./gradlew testDebugUnitTest` 步骤 |
-| `app/build.gradle.kts` | [改] | 新增依赖（nanohttpd / junrar / coil / junit）|
-| `tools/samples/{titles,body,lookbehind}/*.txt` | [改] | 补充真实样本供 CI |
-| `docs/pdf_research.md` | [新] | F04 仅调研结论（无代码）|
-| `docs/system_design.md` `docs/sequence-diagram.mermaid` `docs/class-diagram.mermaid` | [新] | 本设计产物 |
+| `res/drawable/ic_default_cover.xml` | [新] | 默认封面占位矢量图（书籍+问号图标） |
+| `res/values/strings.xml` | [改] | 新增底部导航标签、个人页、设置页文案 |
 
 ---
 
-## 3. 数据结构和接口
+### 3. 数据结构和接口
 
-类图见 `docs/class-diagram.mermaid`。关键数据结构如下。
+#### 3.1 BookEntity（无变更）
+现有字段 `title` 导入时已赋值为 `file.nameWithoutExtension`（P0-5 已满足）。现有 `coverUri` 用于存储封面路径。现有 `format` 字段支持 `"epub"`。
 
-### 3.1 排版参数 `ReaderStyleConfig`（engine/ReaderStyleConfig.kt）
+#### 3.2 新增 DataStore Key（AppPrefs）
+
 ```kotlin
-data class ReaderStyleConfig(
-    val fontScale: Float = 1.0f,            // 来自 AppPrefs.font_scale
-    val lineSpacing: Float = 1.6f,          // AppPrefs.line_spacing（行高倍数）
-    val paragraphSpacingPx: Int = 8,        // D06 精确像素段距
-    val letterSpacing: Float = 0.5f,        // 字间距(sp)
-    val pageMarginPx: Int = 16,             // AppPrefs.page_margin
-    val alignment: TextAlign = TextAlign.Start,
-    val firstLineIndentPx: Int = 0,         // 首行缩进(px)
-    val fontFamily: FontFamilyKey = FontFamilyKey.DEFAULT,
-    val themeMode: ThemeMode = ThemeMode.LIGHT,
-    val brightness: Float = -1f,            // -1 跟随系统
-    val pageAnimation: PageAnimationMode = PageAnimationMode.SMOOTH,
-    val readingMode: ReadingMode = ReadingMode.PAGED,
-    val rtl: Boolean = false,
-    val clickZones: ClickZoneConfig = ClickZoneConfig(),
-    val textureKey: String = "none"
-) {
-    fun toTextStyle(density: Density): TextStyle   // 唯一 TextStyle：测量与渲染共用
-    fun layoutHash(): String                        // 仅含影响排版的字段
-}
+// 全局 TOC 规则（JSON 数组，如 "[\"rule_chinese_num\",\"rule_arabic_num\"]"）
+private val KEY_GLOBAL_TOC_RULES = stringPreferencesKey("global_toc_rules")
+
+// 默认字体（用于新书默认排版）
+private val KEY_DEFAULT_FONT = stringPreferencesKey("default_font")
+
+val globalTocRules: Flow<Set<String>>  // 从 JSON 解析
+suspend fun setGlobalTocRules(rules: Set<String>)
+
+val defaultFont: Flow<String>
+suspend fun setDefaultFont(key: String)
 ```
-**流入 LayoutEngine 的方式**：`ReaderViewModel` 收集 `AppPrefs` 各 `Flow` 合成 `ReaderStyleConfig`；调用 `cfg.toTextStyle(density)` 得到**单一** `TextStyle` 实例，同时把 `paragraphSpacingPx/firstLineIndentPx/pageMarginPx` 作为排版参数传给 `ReaderPagination`→`LayoutEngine.paginate(...)`。`ReaderPage` 渲染时**复用同一 `TextStyle` 实例**，确保测量与渲染行断点完全一致（C02/D06 不破版的关键）。
 
-### 3.2 新增 Room 实体（字段 + 索引）
-**BookmarkEntity**（`bookmarks`）
-- `bookmarkId: Long @PrimaryKey(autoGenerate)`
-- `bookId: String`，索引 `(bookId)`
-- `chapterIndex: Int`，索引 `(bookId, chapterIndex)`
-- `pageIndex: Int`（章节内页序号，便于排序/显示）
-- `charOffset: Int`
-- `previewText: String`
-- `createdAt: Long`
+#### 3.3 EpubParser 数据模型
 
-**ReadingSessionEntity**（`reading_sessions`，F07）
-- `id: Long @PrimaryKey(autoGenerate)`
-- `bookId: String`，索引 `(bookId)`
-- `startedAt: Long`
-- `endedAt: Long`
-- `durationSec: Int`
-- `dateKey: String`（yyyy-MM-dd），索引 `(dateKey)`
-
-**TocRulePrefEntity**（`toc_rule_prefs`，E05）
-- `@PrimaryKey bookId: String` + `ruleId: String`（复合主键）
-- `enabled: Boolean`
-
-**HighlightEntity**（`highlights`，F06）
-- `id: Long @PrimaryKey(autoGenerate)`
-- `bookId: String`，索引 `(bookId)`
-- `chapterIndex: Int` / `startChar: Int` / `endChar: Int`
-- `colorArgb: Int`
-- `createdAt: Long`
-
-**LayoutCacheEntity**（`layout_cache`，C07）
-- `@PrimaryKey cacheKey: String`
-- `bookId: String`
-- `pagesJson: String`（仅存分页结果 = 每章 `(start,end)` 字符区间，KB 级）
-- `createdAt: Long`
-
-**BookEntity 扩展列**：`author: String?`、`coverUri: String?`、`isRead: Boolean`（默认 false）。
-
-### 3.3 `ReaderUiState.Ready` 扩展（解决 C01 全书级百分比）
 ```kotlin
-data class Ready(
-    val chapters: List<Chapter>,
-    val currentChapterIndex: Int,
-    val currentCharOffset: Int,
-    val totalChars: Long,
-    val encoding: String,
-    // —— 新增 ——
-    val styleConfig: ReaderStyleConfig,
-    val perChapterPageCounts: List<Int>,   // 每章页数
-    val totalPages: Int,                    // 全书总页数
-    val currentGlobalPage: Int,             // 跨章当前页（0-based）
-    val globalPercent: Float                // 全书百分比 0..1
+// parser/EpubParser.kt
+data class EpubMetadata(
+    val title: String,
+    val author: String?,
+    val coverImagePath: String?,  // ZIP 内路径
+    val coverImageBytes: ByteArray?
+)
+
+data class EpubChapter(
+    val title: String,
+    val content: String,          // 纯文本（已去 HTML 标签）
+    val charCount: Int
+)
+
+class EpubParser {
+    fun parse(filePath: String, encoding: Charset = StandardCharsets.UTF_8): EpubParseResult
+}
+
+data class EpubParseResult(
+    val metadata: EpubMetadata,
+    val chapters: List<EpubChapter>
 )
 ```
 
-### 3.4 迁移策略
-`AppDatabase` version 2→3，在 `db/Migrations.kt` 写 `Migration(2,3)`：ALTER `books` 增加 `author/coverUri/isRead` 列；CREATE 上述新表。`Room.databaseBuilder` 保留 `fallbackToDestructiveMigration()` 作破坏性兜底；坏缓存自愈（缓存读取 try/catch，异常即删除重排）。
+#### 3.4 ReadingHistoryDao 去重查询
+
+```kotlin
+// 连续同书去重：按 openedAt DESC 排序，相邻同 bookId 只保留第一条
+@Query("""
+    SELECT * FROM (
+        SELECT *, 
+            LAG(bookId) OVER (ORDER BY openedAt DESC) AS prevBookId
+        FROM reading_history
+    ) WHERE bookId IS NOT prevBookId OR prevBookId IS NULL
+    ORDER BY openedAt DESC LIMIT 10
+""")
+fun getDedupedRecentFlow(): Flow<List<ReadingHistoryEntity>>
+```
+
+> **注意**：Room 2.6.1 支持 `LAG()` 窗口函数（SQLite 3.35+，minSdk 26 满足）。若 Room 编译报错，降级为 Kotlin 层去重。
+
+#### 3.5 类图
+
+详见 `docs/class-diagram.mermaid`（增量部分）。
 
 ---
 
-## 4. 程序调用流程
+### 4. 程序调用流程
 
-时序图见 `docs/sequence-diagram.mermaid`，覆盖 6 条主链路：
-① 打开书 → 恢复进度 → 排版（含缓存命中）
-② 改排版参数 → 实时重排（进度保持不跳开头）
-③ 书签增删
-④ 全文搜索 → 跳转
-⑤ 批量导入 → 解析 → 入库
-⑥ WiFi 传书上传 → 入库
+#### 4.1 EPUB 导入流程
 
-关键不变量：**改参数重排时 `currentCharOffset` 保持不变**，由 `ReaderPagination.globalPage(chapter, offset)` 重新定位到同一字符偏移所在页，绝不回到第 0 页（C01/C07）。
+```
+User → ImportDialog(选择.epub) → copyUriToCache → ImportManager.importFiles(paths)
+  → 检测扩展名 .epub
+  → EpubParser.parse(path)
+    → ZipFile.open(path)
+    → 读取 META-INF/container.xml → 获取 OPF 路径
+    → 解析 OPF XML → metadata(title, creator) + manifest(items) + spine(itemrefs)
+    → 查找 cover: manifest 中 id 含 "cover" 或 properties="cover-image"
+    → 提取 cover image bytes
+    → 遍历 spine → 读取各 HTML → 去标签 → 纯文本 → 按<h1>-<h6>切章
+    → 返回 EpubParseResult(metadata, chapters)
+  → 保存封面: BookRepository.saveCoverImage(bookId, bytes) → filesDir/cover/{bookId}.png
+  → 计算 totalChars
+  → upsertBook(BookEntity(title=metadata.title, format="epub", coverUri=...))
+  → 通知进度回调
+```
 
----
+#### 4.2 阅读面板弹出/收起流程
 
-## 5. 任务列表（核心交付，有序 + 依赖）
+```
+默认: isPanelVisible = false → TopBar + BottomBar = Gone
+用户点击屏幕中间:
+  → ReaderContent.detectTapGestures → ClickZoneHandler.zoneFromOffset
+  → 若 zone == CENTER:
+    → 若 isPanelVisible == false → toggle → isPanelVisible = true
+    → 若 isPanelVisible == true → toggle → isPanelVisible = false
+      （面板可见时，CENTER 区域优先切换面板，不触发 OPEN_MENU）
+面板可见时:
+  → AnimatedVisibility(visible=true) → TopBar slideInVertically + BottomBar slideInVertically
+  → 顶部溢出菜单: DropdownMenu(搜索/书签)
+  → 太阳图标: DropdownMenu(亮度Slider/背景色ChipRow/日夜模式Switch)
+  → 排版键: ModalBottomSheet(字号/边距/对齐/字体)
+```
 
-> 排序原则：**先打通编译主干（数据层 + 排版参数 + 引擎 + 主题），再补枝节**；把"改参数重排不跳开头""缓存""跨章进度"等贯穿性能力前置。
-> 验证方式：`assembleDebug` 编译通过（CI）+ 标注的单元/UI 验证。
+#### 4.3 时序图
 
-| ID | 所属 Phase | 任务 | 改动文件（关键） | 依赖 | 验证 |
-|----|-----------|------|------------------|------|------|
-| **T01** | 数据层 | 数据库迁移 + 新增实体/仓储 | `db/AppDatabase.kt` `BookEntity.kt` `BookDao.kt` `BookmarkEntity/Dao` `ReadingSessionEntity` `StatsDao` `TocRulePrefEntity/Dao` `HighlightEntity/Dao` `LayoutCacheEntity/Dao` `Migrations.kt` `data/BookRepository.kt` `BookmarkRepository.kt` `StatsRepository.kt` | — | `assembleDebug`；Migration(2→3) 在真机/模拟器升级不丢数据 |
-| **T02** | 引擎基座 | 排版参数数据类 + 风格工厂 + 偏好 key | `engine/ReaderStyleConfig.kt` `ui/theme/ThemeDefs.kt` `prefs/AppPrefs.kt` | — | 编译；`toTextStyle`/`layoutHash` 单测 |
-| **T03** | 引擎(D06/D08) | 排版引擎增强：段落测量 + 精确段距 + 分块测量 | `engine/LayoutEngine.kt` `LayoutResult.kt` `util/ParagraphSplitter.kt` | T02 | `ParagraphSplitterTest`；3× 字号不破版；超大章节分块不 OOM |
-| **T04** | 引擎/缓存 | 分页服务 + 跨章进度 + 布局缓存 | `engine/ReaderPagination.kt` `LayoutCache.kt` `db/LayoutCacheEntity/Dao` | T01,T03 | 缓存命中跳过测量；跨章 page/percent 正确 |
-| **T05** | 主题(C03) | 多主题系统 + 状态栏 + 阅读区配色 | `ui/theme/Color.kt` `Theme.kt` `ReaderThemeColors.kt` | T02 | 四主题切换；状态栏随主题 |
-| **T06** | 阅读 VM | ReaderUiState/ViewModel 重构（承载分页与进度）| `ui/reader/ReaderUiState.kt` `ReaderViewModel.kt` | T04,T01 | 打开恢复进度；改参数重排不跳开头 |
-| **T07** | 阅读渲染(C02/D05/D06) | 正文渲染：字号缩放/字体/段距/对齐/RTL/标题预留 | `ui/reader/ReaderContent.kt` `ReaderPage.kt` `ReaderScreen.kt` | T05,T06,T02 | 150/200/300% 不破版；RTL 正确；章首页标题不重叠 |
-| **T08** | 阅读(C01) | 底部状态栏（全书页码/百分比）| `ui/reader/ReaderStatusBar.kt` `ReaderScreen.kt` | T06 | 显示"第 x/总 页 · n%" |
-| **T09** | 阅读工具 | 底部工具条 + 设置面板（弹窗底部展开）| `ui/reader/ReaderToolbar.kt` `SettingsSheet.kt` `ReaderScreen.kt` | T05,T02,T07 | 调参实时重排且进度保持 |
-| **T10** | 阅读(TOC/E05) | 目录左侧抽屉 + 每章规则开关 | `ui/reader/TocDrawer.kt` `parser/TxtParser.kt` `parser/TocRules.kt` | T06,T01 | 左抽屉打开；跳转；规则开关持久化 |
-| **T11** | 内容(D01) | 书签系统 | `feature/...` 经 `BookmarkSheet.kt` + `BookmarkRepository` | T01,T06 | 增/删/列；预览文本 |
-| **T12** | 内容(D02) | 全文搜索 + 跳转 | `feature/search/SearchEngine.kt` `SearchSheet.kt` `ReaderViewModel.kt` | T06 | 搜索→上下文→跳转 |
-| **T13** | 书架(C04/F05) | 书架增强：排序/筛选/封面 3:4/书名常显/最近 | `ui/shelf/ShelfScreen.kt` `ShelfViewModel.kt` `SortFilterBar.kt` `BookCover.kt` `BookRepository.kt` | T01 | 排序/筛选生效；封面比例 3:4 书名常显 |
-| **T14** | 导入(D03/C05) | 批量导入（多文件/文件夹/压缩包/批量编码）| `feature/import/ImportManager.kt` `ArchiveExtractor.kt` `ui/shelf/ImportDialog.kt` `EncodingDetector.kt` `LruEncodingCache.kt` | T13,T01 | 多选/zip 导入；编码识别 |
-| **T15** | 字体(D04) | 字体管理：内置字族 + 导入 TTF/OTF | `feature/fonts/FontManager.kt` `SettingsSheet.kt` `AppPrefs.kt` | T02,T09 | 切换内置字族；导入 TTF 生效 |
-| **T16** | 交互(E01) | 点击区域自定义 | `feature/clickzone/ClickZoneHandler.kt` `ReaderContent.kt` `AppPrefs.kt` `SettingsSheet.kt` | T07,T02 | 四区域映射到动作 |
-| **T17** | 交互(E03) | 翻页动画（原生 + 3D 近似）| `feature/animation/PageAnimation.kt` `ReaderContent.kt` `SettingsSheet.kt` | T07,T02 | 平滑/无/3D 翻转 |
-| **T18** | 无障碍(E04) | TalkBack 支持 | `ReaderPage.kt` `ReaderStatusBar.kt` `ReaderToolbar.kt` | T08 | TalkBack 焦点与描述 |
-| **T19** | 便捷(E02) | WiFi 传书 | `feature/wifi/*` `res/raw/wifi_upload.html` `ShelfScreen.kt` `build.gradle.kts` | T14 | 浏览器上传→书籍入库 |
-| **T20** | P2(F01) | 音量键翻页 | `ReaderScreen.kt` `ReaderViewModel.kt` | T06 | 音量键翻页 |
-| **T21** | P2(F02) | 背景纹理 | `res/drawable/texture_*` `SettingsSheet.kt` `ReaderContent.kt` `AppPrefs.kt` | T09 | 选纹理生效 |
-| **T22** | P2(F03) | 导出/分享 | `feature/export/ExportManager.kt` `BookmarkSheet.kt` `SearchSheet.kt` | T11,T12 | 导出书签为 TXT；分享 |
-| **T23** | P2(F05) | 元信息编辑（书名/作者/封面）| `ui/shelf/BookMetaEditor.kt` `ShelfViewModel.kt` | T13 | 编辑持久化 |
-| **T24** | P2(F06) | 高亮/划线 | `feature/highlight/HighlightManager.kt` `HighlightEntity/Dao` `ReaderPage.kt` `HighlightSheet.kt` `AppDatabase.kt` | T01,T07 | 选区高亮；列表；换色 |
-| **T25** | P2(F07) | 阅读统计 | `feature/stats/ReadingStatsTracker.kt` `StatsRepository.kt` `ReaderViewModel.kt` `StatsScreen.kt` | T01 | 读 1 分钟→会话记录；聚合 |
-| **T26** | 调研(F04) | PDF 可行性调研（仅文档）| `docs/pdf_research.md` | — | 交付结论文档，无代码 |
-| **T27** | QA(C05/D07) | CI 单元测试 + 样本 | `app/src/test/...` `tools/samples/*` `.github/workflows/ci.yml` `build.gradle.kts` | T03,T10,T14 | CI `testDebugUnitTest` 绿 |
+详见 `docs/sequence-diagram.mermaid`（v1.1 关键流程）。
 
 ---
 
-## 6. 依赖包列表（本期新增，均兼容 Kotlin 1.9.22 / Compose BOM 2023.10.01）
+### 5. 待明确事项
 
-| 依赖 | 版本 | 作用 | 风险/备注 |
-|------|------|------|-----------|
-| `fi.iki.elonen:nanohttpd` | `2.3.1` | E02 WiFi 传书内嵌 HTTP Server | 纯 Java，Android 兼容，低风 |
-| `com.github.anjoze:junrar` | `7.5.5`（≈，CI 验证）| D03 rar 解压（best-effort）| **风险**：minSdk26 下需 CI 验证；失败则降级为仅 zip + 提示用户 |
-| `io.coil-kt:coil-compose` | `2.5.0` | F02/F05 封面与纹理 Uri 加载 | 可选；不用则改 `ImageBitmap` 加载，零新增依赖 |
-| `junit:junit` | `4.13.2` | CI JVM 单测 | `testImplementation` |
-
-既有依赖保持不变（Compose BOM 2023.10.01 / material3 / room 2.6.1 / navigation 2.7.5 / datastore 1.0.0 / juniversalchardet 2.4.0 / lifecycle / ksp）。
+| # | 事项 | 推荐方案 |
+|---|------|----------|
+| 1 | **窗口函数兼容性**：`LAG()` 在 Room 2.6.1 + SQLite 3.35+ 可用，但需 CI 验证。若编译报错，降级为 Kotlin 层去重 | 先用 SQL 窗口函数；编译不过则切 Kotlin |
+| 2 | **EPUB HTML→纯文本**：用 `regex <[^>]*>` 简单去标签，可能残留 CSS/JS 内联 | 接受 MVP 质量；复杂 EPUB（含大量 CSS）可能出现残留，后续可迭代 |
+| 3 | **面板自动收起**：PRD 写"3 秒无操作自动收起（可选）"→ 已确认"手动点击空白处收起" | 按确认实现：仅手动 toggle，不自动收起 |
 
 ---
 
-## 7. 共享知识（跨文件约定）
+## Part B: 任务分解
 
-1. **排版参数默认值来源**：全部来自 `AppPrefs` 既有 key（`font_scale` 默认 1.0、`line_spacing` 1.6、`page_margin` 16）；新增项给保守默认（段距 8px、字距 0.5sp、对齐 Start、动画 SMOOTH、模式 PAGED）。
-2. **唯一 TextStyle**：测量与渲染必须使用 `ReaderStyleConfig.toTextStyle(density)` 返回的同一实例；任何新增排版维度（段距/对齐/首行缩进）必须同时作用于该 `TextStyle` 与 `LayoutEngine` 参数，否则视为 bug。
-3. **段距精确像素（D06）**：`ParagraphSplitter` 按"1+ 空白行"切段落并去重连续空行；`LayoutEngine` 逐段落测量后按 `paragraphSpacingPx` 注入，绝不用行高倍数近似。
-4. **进度保持**：改参数/换主题触发重排时，ViewModel 始终保留 `currentChapterIndex + currentCharOffset`，由 `ReaderPagination` 重新定位到同偏移页，禁止回到第 0 页。
-5. **主题切换**：`ReaderTheme` 按 `ThemeMode` 选 scheme；状态栏颜色 = 当前 scheme.background；阅读区背景/正文用 `ReaderThemeColors`（随主题变）。
-6. **RTL**：BOM 1.5.4 的 `HorizontalPager` 不保证有 `reverseLayout`；统一用"页面索引反转 + `CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl)`"实现，避免依赖 BOM 外 API。
-7. **缓存 key 规则**：`LayoutCacheEntity.cacheKey = sha1(fingerprint + styleConfig.layoutHash() + "${maxWidthPx}x${maxHeightPx}")`；`layoutHash()` 仅含影响排版的字段（fontScale/lineSpacing/paragraphSpacing/letterSpacing/pageMargin/alignment/fontFamily），**不含 themeMode**（主题只改颜色不改排版）。坏缓存 try/catch 自愈。
-8. **数据库迁移**：version 2→3 写 `Migration` 保留历史；保留 `fallbackToDestructiveMigration()` 兜底。
-9. **阅读工具 UI 一律底部**：工具条/设置/书签/搜索均为 `ModalBottomSheet` 从底部展开；TOC 为左侧 `ModalNavigationDrawer`。
-10. **字体导入（D04）**：内置 = `DEFAULT/SANS[黑体]/SERIF[宋体·楷体近似]/MONOSPACE[等宽]` 系统字族映射；用户导入 TTF/OTF 存于 `files/fonts/`，经 `Typeface.Builder(path)` → `Font(Typeface)` 解析；**不打包商用字体**。
-11. **阅读统计（F07）**：无前台服务；`ReadingStatsTracker` 在前台采样 + 心跳，离开页面写 `ReadingSessionEntity`。
-12. **章节切分（D07/E05）**：规则集集中在 `parser/TocRules.kt`，全 `^...$` 整行锚定 + 负向过滤；`TxtParser.parse` 接收启用规则集合；每本书开关存 `TocRulePrefEntity`。
+### 6. 依赖包列表
 
----
+本期**无新增三方依赖**。所有能力基于现有依赖实现：
 
-## 8. 待明确事项（≤3 条，含推荐）
-
-1. **rar 支持可行性（D03）**：`com.github.anjoze:junrar` 在 minSdk 26 + Kotlin 1.9 下能否编译/运行未经真机验证，且 rar5 不支持。
-   → **推荐**：先实现 zip 全量 + rar 用 junrar 做 best-effort；CI 验证，若失败降级为"仅 zip，rar 提示用户用 zip"，不影响主干。
-2. **仿真翻页 3D 近似的验收标准（E03）**：拍板"不引入三方库、用 3D 翻转近似"。但"近似"视觉接受度无量化标准。
-   → **推荐**：用 `graphicsLayer { rotationY }` 在 pager 过渡实现翻页翻转；以"无明显撕裂/闪烁、过渡 < 400ms"为内部验收；上线前需你/用户确认是否够用。
-3. **排版缓存 key 是否纳入主题（C07）**：主题切换只改颜色、不改排版，但"羊皮纸"等背景可能影响可用高度（若纹理带内边距）。
-   → **推荐**：`layoutHash()` 仅含排版字段（不含 themeMode）；若某主题需额外内边距，则把该内边距作为 `pageMarginPx` 变体纳入 hash。需你确认此边界。
+```
+# 现有依赖（无变更）
+- androidx.compose:compose-bom:2023.10.01
+- androidx.compose.material3:material3 (1.1.2)
+- androidx.compose.material:material-icons-extended
+- androidx.navigation:navigation-compose:2.7.5
+- androidx.room:room-runtime:2.6.1 / room-ktx:2.6.1 / room-compiler:2.6.1
+- androidx.datastore:datastore-preferences:1.0.0
+- androidx.lifecycle:lifecycle-runtime-compose:2.6.2
+- androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2
+- com.github.albfernandez:juniversalchardet:2.4.0
+- org.nanohttpd:nanohttpd:2.3.1
+- androidx.documentfile:documentfile:1.0.1
+- com.github.junrar:junrar:7.5.5
+```
 
 ---
 
-> 结论：本设计在既有 Phase 0/1 代码之上增量扩展，27 个有序任务覆盖 C01–C05 / D01–D08 / E01–E05 / F01–F07（F04 仅调研），并落实团队负责人全部拍板（PDF 仅调研、翻页动画不引三方库、字体内置字族映射、统计无前台服务、C05/D07 用 CI 单测）。优先打通数据层 + 排版引擎 + 主题编译主干，再按依赖补齐枝节。
+### 7. 任务列表（按依赖排序）
+
+#### T01: 项目基础设施 — 底部导航重构 + 新页面骨架 + Shelf 调整
+
+| 属性 | 值 |
+|------|-----|
+| **Task ID** | T01 |
+| **优先级** | P0 |
+| **依赖** | 无 |
+
+**改动文件（6 个）**：
+
+| 文件 | 动作 | 说明 |
+|------|------|------|
+| `app/build.gradle.kts` | [改] | 验证 `material-icons-extended` 在依赖中（底部导航图标需要） |
+| `MainActivity.kt` | [改] | 重构：`Scaffold(bottomBar = NavigationBar{...})` → 内含 NavHost（shelf/bookstore/profile）；reader 路由全屏 overlay |
+| `ui/bookstore/BookStoreScreen.kt` | [新] | 纯占位：居中 Text("书城即将推出") |
+| `ui/profile/ProfileScreen.kt` | [新] | 骨架：Column(最近阅读区域 + 阅读统计> 入口 + 系统设置> 入口)，点击入口暂用 TODO |
+| `ui/settings/SettingsScreen.kt` | [新] | 骨架：Column(主题模式/默认字体/目录规则/关于)，各项暂用 TODO |
+| `ui/shelf/ShelfScreen.kt` | [改] | TopAppBar actions 移除 Wifi 图标和 Stats 图标；保留导入 FAB 和 + 按钮 |
+
+**关键实现要点**：
+- `MainActivity` 的 `ReaderNavigation` 改为：`Scaffold` + `NavigationBar`（三个 `NavigationBarItem`：书架/书城/个人），`content` 区放 NavHost
+- 阅读页路由（`reader/{bookPath}`）在 NavHost 内但全屏覆盖底部导航（通过 `Scaffold` 的 content padding 控制，或在 reader 路由时不显示底部导航）
+- 推荐方案：`NavHost` 内 `composable("reader/{bookPath}")` 时，通过状态控制隐藏底部 NavigationBar
+
+---
+
+#### T02: 数据层改动 — 去重查询 + 偏好键 + ViewModel 调整
+
+| 属性 | 值 |
+|------|-----|
+| **Task ID** | T02 |
+| **优先级** | P1 |
+| **依赖** | 无（可与 T01 并行） |
+
+**改动文件（5 个）**：
+
+| 文件 | 动作 | 说明 |
+|------|------|------|
+| `db/ReadingHistoryDao.kt` | [改] | 新增 `getDedupedRecentFlow()`：`SELECT DISTINCT ON (bookId) ... ORDER BY openedAt DESC LIMIT 10`（或 LAG 窗口函数方案） |
+| `data/BookRepository.kt` | [改] | 新增 `getDedupedRecentHistoryFlow()` 封装 DAO 去重查询；新增 `saveCoverImage(context, bookId, bytes)` 保存封面到 `filesDir/cover/` |
+| `prefs/AppPrefs.kt` | [改] | 新增 `companion object` 键：`KEY_GLOBAL_TOC_RULES`（String/JSONArray）、`KEY_DEFAULT_FONT`（String）；配套 `Flow` + `suspend set` |
+| `ui/shelf/ShelfViewModel.kt` | [改] | 保留 `recentHistory`（书架内去重版），但书架 UI 不再显示最近阅读 section |
+| `ui/reader/TocDrawer.kt` | [改] | 移除底部"章节识别规则"整个区域（`Divider` + `Text("章节识别规则")` + `Switch` 列表） |
+
+**关键实现要点**：
+- 去重查询备选方案（按优先级）：① `LAG()` 窗口函数 → ② Kotlin `distinctBy { it.bookId }` → ③ 新增 SQL 列标记
+- `saveCoverImage` 路径：`context.filesDir/cover/{bookId}.png`（bookId = filePath 的 URLEncoder 版本）
+- `globalTocRules` 存储格式：`["rule_chinese_num","rule_arabic_num"]` JSON 数组
+
+---
+
+#### T03: EPUB 解析 + 导入增强 + 封面处理
+
+| 属性 | 值 |
+|------|-----|
+| **Task ID** | T03 |
+| **优先级** | P0 |
+| **依赖** | 无（使用现有 ImportManager 接口，独立可测） |
+
+**改动文件（6 个）**：
+
+| 文件 | 动作 | 说明 |
+|------|------|------|
+| `parser/EpubParser.kt` | [新] | 核心解析器：`ZipFile` 读取 → `XmlPullParser` 解析 container.xml/OPF → 提取 metadata/manifest/spine → HTML 去标签 → `EpubParseResult` |
+| `feature/import/ImportManager.kt` | [改] | `importFiles()` 按扩展名路由：`.epub`→`EpubParser`，`.txt`→`TxtParser`；提取封面后调 `BookRepository.saveCoverImage`；封面 URI 写入 `BookEntity.coverUri` |
+| `feature/import/ArchiveExtractor.kt` | [改] | `extract()` 的 `else` 分支加入 `.epub`：直接 `out.add(path)`（不解压，epub 本身就是 zip 但由 EpubParser 内部处理） |
+| `ui/shelf/ImportDialog.kt` | [改] | `collectTreePaths` 加入 `name.endsWith(".epub", true)`；文件选择器回调后显示 Snackbar 导入进度；`filePicker.launch` MIME 加入 `"application/epub+zip"` |
+| `data/BookRepository.kt` | [改] | 若 T02 未合并则此处添加 `saveCoverImage`（已在 T02 声明，此处使用） |
+| `parser/Chapter.kt` | [改] | 确认兼容 EPUB 场景（`contentLines` 从 EPUB HTML 解析来，行数 > 0） |
+
+**关键实现要点**：
+- EPUB 内部结构：`META-INF/container.xml` → `rootfile full-path` → OPF 文件 → `<metadata>`（dc:title/dc:creator）+ `<manifest>`（`<item id/href/media-type>`）+ `<spine>`（`<itemref idref>`）
+- 封面查找逻辑：manifest items 中 `id` 包含 "cover"（大小写不敏感）或 `properties="cover-image"`
+- HTML→纯文本：`replace(Regex("<[^>]*>"), "")`，然后 `android.text.Html.fromHtml(..., FROM_HTML_MODE_LEGACY)` 解码实体
+- 章节切分：spine 中每个 itemref 对应一个 HTML 文件→解析为 `EpubChapter`；若无明显章节标记，整个 HTML 作为一个章节
+- 封面存储：`context.filesDir/cover/{bookId}.png`，URI 格式 `file:///data/data/com.example.reader/files/cover/{bookId}.png`
+
+---
+
+#### T04: 阅读器面板重构 — 可收起 + 功能重组
+
+| 属性 | 值 |
+|------|-----|
+| **Task ID** | T04 |
+| **优先级** | P0 |
+| **依赖** | 无（纯 UI 改动，使用现有 prefs） |
+
+**改动文件（7 个）**：
+
+| 文件 | 动作 | 说明 |
+|------|------|------|
+| `ui/reader/ReaderScreen.kt` | [改] | 引入 `var isPanelVisible = false`；用 `AnimatedVisibility` 包裹 TopBar/BottomBar；移除旧 Scaffold topBar/bottomBar 参数；面板可见时显示 TopBar + BottomBar |
+| `ui/reader/ReaderTopBar.kt` | [新] | `Row(返回IconButton + Text(书名, weight(1f)) + 溢出IconButton)`；溢出菜单 DropdownMenu：搜索🔍、书签🔖 |
+| `ui/reader/ReaderBottomBar.kt` | [新] | `Row(太阳IconButton + 章节Text + 排版IconButton)`；太阳弹出菜单：亮度Slider + 背景色ChipRow + 日夜模式Switch；排版弹出：字号/边距/对齐/字体（可用 ModalBottomSheet 或内联 DropdownMenu） |
+| `ui/reader/ReaderContent.kt` | [改] | `detectTapGestures` 中 CENTER 区域：若 `isPanelVisible`→toggle 隐藏面板；若 `!isPanelVisible`→toggle 显示面板。面板隐藏时 CENTER 不触发 `OPEN_MENU` |
+| `ui/reader/ReaderToolbar.kt` | [改] | 简化为空或标记 `@Deprecated`；旧 5 按钮（目录/设置/书签/搜索/高亮）功能已迁移 |
+| `ui/reader/SettingsSheet.kt` | [改] | 移除已在底部排版键中覆盖的部分（字号/行距/边距/对齐/字体），保留高级设置（翻页动画/RTL/点击区域/纹理/段距/字距/首行缩进） |
+| `ui/reader/ReaderViewModel.kt` | [改] | 无核心逻辑变更；确认 `saveProgress` 在面板切换时不重复调用 |
+
+**关键实现要点**：
+- `AnimatedVisibility(visible = isPanelVisible, enter = fadeIn + slideInVertically, exit = fadeOut + slideOutVertically)`
+- 章节导航：◀（上一章）→ T（当前章名，点击打开 TocDrawer）→ ▸（下一章）
+- 太阳图标功能对照：
+  - **亮度**：`prefs.brightness`，Slider(-1f..1f)，-1=跟随系统
+  - **背景色**：`prefs.themeMode`，ChipRow(浅色/深色/OLED黑/羊皮纸)
+  - **日夜模式**：已包含在背景色中（深色=夜间）
+- 排版键功能对照：
+  - **字号**：`prefs.fontScale`，Slider(0.5f..3f)
+  - **页边距**：`prefs.pageMargin`，Slider(0..64)
+  - **对齐**：`prefs.alignment`，ChipRow(起始/居中/两端/末尾)
+  - **字体**：`prefs.fontFamily`，ChipRow(系统/思源/等宽)
+
+---
+
+#### T05: 个人页完成 + 设置页完成 + TOC 规则迁移 + 最近阅读去重
+
+| 属性 | 值 |
+|------|-----|
+| **Task ID** | T05 |
+| **优先级** | P1 |
+| **依赖** | T01（页面骨架）, T02（去重查询 + AppPrefs + TocDrawer 已移除规则） |
+
+**改动文件（7 个）**：
+
+| 文件 | 动作 | 说明 |
+|------|------|------|
+| `ui/profile/ProfileScreen.kt` | [改] | 完成实现：`LazyRow` 展示去重最近阅读（`BookCover` 卡片 + 点击打开）；"阅读统计 >" 点击导航 StatsScreen；"系统设置 >" 点击导航 SettingsScreen |
+| `ui/settings/SettingsScreen.kt` | [改] | 完成实现：主题模式（DropdownMenu 或 ChipRow）、默认字体（ChipRow）、目录规则（点击导航 TocRuleSettingsScreen）、关于（Text v1.1.0） |
+| `ui/settings/TocRuleSettingsScreen.kt` | [新] | 独立页面：LazyColumn 列出 `TocRules.ALL` 每项 + Switch（读写 `AppPrefs.globalTocRules`）；顶栏返回键 |
+| `ui/reader/TocDrawer.kt` | [改] | 已在 T02 移除规则开关；T05 确认无残留，目录跳转功能正常 |
+| `ui/shelf/BookCover.kt` | [改] | `coverUri` 为空时显示 `R.drawable.ic_default_cover`（默认占位封面） |
+| `res/drawable/ic_default_cover.xml` | [新] | 矢量图：书本轮廓 + 问号，主题色适配（`?attr/colorOnSurfaceVariant`） |
+| `res/values/strings.xml` | [改] | 新增字符串资源：底部导航标签（书架/书城/个人）、个人页标题、设置项标签、目录规则标题、默认封面 contentDescription |
+
+**关键实现要点**：
+- `ProfileScreen` 最近阅读：`val recentBooks by repository.getDedupedRecentHistoryFlow().collectAsState()` → 关联 `BookEntity` → LazyRow 展示
+- 去重逻辑在 Repository/DAO 层（T02 已实现），ProfileScreen 直接使用
+- `TocRuleSettingsScreen`：`val rules by prefs.globalTocRules.collectAsState()` + `Switch(onCheckedChange = { prefs.setGlobalTocRules(newRules) })`
+- 全局 TOC 规则影响 `TxtParser.parseWithRules()` 和 `EpubParser`（如 EPUB 也需章节检测规则）
+- 导航：ProfileScreen → `onNavigateToStats`/`onNavigateToSettings` → NavHost 路由；SettingsScreen → `onNavigateToTocRules` → NavHost 路由
+
+---
+
+### 8. 共享约定
+
+1. **底部导航路由**：`shelf` / `bookstore` / `profile` 三个顶层路由，reader 路由 `reader/{bookPath}` 全屏覆盖
+2. **封面路径约定**：`context.filesDir/cover/{bookId}.png`，bookId 不含特殊字符（URLEncoder 处理）
+3. **全局 TOC 规则存储**：DataStore key `global_toc_rules`，JSON 数组格式 `["rule_id_1","rule_id_2"]`
+4. **EPUB 解析约定**：HTML→纯文本使用 `Regex("<[^>]*>")` 去标签 + `Html.fromHtml` 解码实体；不处理 CSS 样式
+5. **面板动画**：统一使用 `animateFloatAsState` 或 `AnimatedVisibility`，时长 300ms
+6. **所有新页面**：使用 `@OptIn(ExperimentalMaterial3Api::class)`（M3 1.1.2 多个组件仍标记为 Experimental）
+7. **Divider**：Material3 1.1.2 用 `Divider`（非 `HorizontalDivider`，那是更高版本的 API）
+8. **SelectionContainer**：导入路径 `androidx.compose.foundation.text.selection.SelectionContainer`
+9. **TOC 规则全局化后**：`TxtParser.parse()` 默认使用全局 TOC 规则（从 AppPrefs 读取），移除 per-book 规则参数（或保留为可选 override）
+
+---
+
+### 9. 任务依赖图
+
+```
+┌─────────────┐
+│     T01     │  基础设施（底部导航 + 骨架 + Shelf调整）
+│   (6 files) │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│     T02     │     │     T03     │     │     T04     │
+│   数据层    │     │  EPUB导入   │     │  阅读器面板  │
+│  (5 files)  │     │  (6 files)  │     │  (7 files)  │
+└──────┬──────┘     └─────────────┘     └─────────────┘
+       │               (独立并行)          (独立并行)
+       ▼
+┌─────────────┐
+│     T05     │  个人页+设置页+TOC迁移+去重
+│  (7 files)  │
+└─────────────┘
+```
+
+**并行度**：T01、T02、T03、T04 可同时开工（操作不同文件，无冲突）。T05 等待 T01（页面骨架）+ T02（数据查询）完成后进行。
+
+**预估总改动量**：新建 9 个文件 + 修改 18 个文件 = 约 31 个文件受影响。每个任务含 5–7 个文件。
