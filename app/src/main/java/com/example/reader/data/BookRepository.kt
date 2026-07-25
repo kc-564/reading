@@ -6,6 +6,7 @@ import com.example.reader.db.ReadingHistoryEntity
 import com.example.reader.parser.Chapter
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.io.File
 
 /**
  * Repository that mediates between the data layer (Room DB) and the rest of the app.
@@ -83,6 +84,9 @@ class BookRepository(private val db: AppDatabase) {
 
     fun getRecentHistoryFlow(): Flow<List<ReadingHistoryEntity>> = historyDao.getRecentHistoryFlow()
 
+    /** Deduplicated recent books (GROUP BY bookId + MAX openedAt). Returns full [BookEntity] list. */
+    fun getRecentDistinctBookFlow(): Flow<List<BookEntity>> = historyDao.getRecentDistinctBooks()
+
     suspend fun recordOpen(bookId: String, progressPercent: Float) {
         historyDao.upsertHistory(
             ReadingHistoryEntity(
@@ -94,6 +98,23 @@ class BookRepository(private val db: AppDatabase) {
     }
 
     // ── Helpers ──
+
+    /**
+     * Saves a cover image to the app's internal storage.
+     *
+     * @param context   Android context (for filesDir resolution).
+     * @param bookId    Book identifier used as the filename stem.
+     * @param bytes     Raw image bytes (PNG, JPEG, etc.).
+     * @return The absolute file path where the cover was written.
+     */
+    fun saveCoverImage(context: android.content.Context, bookId: String, bytes: ByteArray): String {
+        val dir = File(context.filesDir, "cover")
+        if (!dir.exists()) dir.mkdirs()
+        val safeId = java.net.URLEncoder.encode(bookId, "UTF-8")
+        val file = File(dir, "$safeId.png")
+        file.writeBytes(bytes)
+        return file.absolutePath
+    }
 
     /**
      * Calculates the cumulative reading percent across chapters.
