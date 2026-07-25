@@ -11,14 +11,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,7 +42,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.reader.data.ReadFilter
 import com.example.reader.data.SortMode
 import com.example.reader.db.BookEntity
-import com.example.reader.db.ReadingHistoryEntity
 import kotlinx.coroutines.launch
 
 /**
@@ -60,12 +55,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun ShelfScreen(
     onNavigateToReader: (String) -> Unit = {},
-    onNavigateToWifi: () -> Unit = {},
-    onNavigateToStats: () -> Unit = {}
 ) {
     val viewModel: ShelfViewModel = viewModel()
     val books by viewModel.books.collectAsStateWithLifecycle(emptyList())
-    val recentHistory by viewModel.recentHistory.collectAsStateWithLifecycle(emptyList())
     val sortMode by viewModel.sortMode.collectAsStateWithLifecycle(SortMode.LAST_OPENED)
     val readFilter by viewModel.readFilter.collectAsStateWithLifecycle(ReadFilter.ALL)
 
@@ -87,12 +79,6 @@ fun ShelfScreen(
                 actions = {
                     IconButton(onClick = { showImport = true }) {
                         Icon(Icons.Filled.Add, contentDescription = "导入书籍")
-                    }
-                    IconButton(onClick = onNavigateToWifi) {
-                        Icon(Icons.Filled.Wifi, contentDescription = "WiFi 传书")
-                    }
-                    IconButton(onClick = onNavigateToStats) {
-                        Icon(Icons.Filled.BarChart, contentDescription = "阅读统计")
                     }
                 }
             )
@@ -117,18 +103,6 @@ fun ShelfScreen(
                         onSortChanged = viewModel::setSortMode,
                         onFilterChanged = viewModel::setReadFilter
                     )
-                }
-
-                if (recentHistory.isNotEmpty()) {
-                    item {
-                        Text("最近阅读", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(8.dp))
-                        RecentRow(
-                            history = recentHistory,
-                            books = books,
-                            onOpen = onNavigateToReader
-                        )
-                    }
                 }
 
                 item {
@@ -209,30 +183,5 @@ fun ShelfScreen(
             },
             onDismiss = { editBook = null }
         )
-    }
-}
-
-@Composable
-private fun RecentRow(
-    history: List<ReadingHistoryEntity>,
-    books: List<BookEntity>,
-    onOpen: (String) -> Unit
-) {
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        items(history, key = { it.id }) { h ->
-            val book = books.find { it.bookId == h.bookId }
-            if (book != null) {
-                Box(modifier = Modifier.width(140.dp)) {
-                    BookCover(
-                        book = book,
-                        onOpen = { onOpen(book.bookId) },
-                        onMenu = { }
-                    )
-                }
-            }
-        }
     }
 }
