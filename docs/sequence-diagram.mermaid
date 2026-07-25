@@ -1,130 +1,166 @@
-%% 阅读器 App 核心调用流程时序图（6 条主链路）
+%% 阅读器 App v1.1 增量 — 关键调用流程时序图
 %% 见 docs/system_design.md §4
 
-%% ── ① 打开书 → 恢复进度 → 排版（含缓存命中）──
-sequenceDiagram
-    participant U as User
-    participant RS as ReaderScreen
-    participant VM as ReaderViewModel
-    participant Repo as BookRepository
-    participant FP as FileFingerprint
-    participant Cache as LayoutCache
-    participant Pag as ReaderPagination
-    participant Eng as LayoutEngine
-
-    U->>RS: navigate("reader/{path}")
-    RS->>VM: create(bookPath)
-    VM->>Repo: getBook(path)
-    alt 已有记录
-        Repo-->>VM: BookEntity(lastChapter,lastOffset)
-    else 新书
-        VM->>Repo: upsertBook(BookEntity)
-    end
-    VM->>FP: fingerprint(path)
-    VM->>Cache: get(key = fp + styleHash + screen)
-    alt 缓存命中
-        Cache-->>VM: 各章 pages
-    else 未命中
-        VM->>Pag: paginateBook(chapters, styleConfig, w, h)
-        Pag->>Eng: paginate(chapterText, textStyle, w, h, cfg)
-        Eng-->>Pag: List<PageInfo>
-        Pag-->>VM: BookPagination(totalPages, perChapterCounts)
-        VM->>Cache: put(key, pages)
-    end
-    VM->>VM: 计算 currentGlobalPage / globalPercent
-    VM-->>RS: ReaderUiState.Ready(...)
-    RS->>RS: pager 恢复到 currentGlobalPage
-
-%% ── ② 改排版参数 → 实时重排（进度保持不跳开头）──
-sequenceDiagram
-    participant U as User
-    participant SS as SettingsSheet
-    participant Prefs as AppPrefs
-    participant VM as ReaderViewModel
-    participant Pag as ReaderPagination
-    participant Eng as LayoutEngine
-    participant RS as ReaderScreen
-
-    U->>SS: 改 fontScale/lineSpacing/margin/theme
-    SS->>Prefs: setX(...)
-    Prefs-->>VM: styleConfig Flow 发射新值
-    VM->>VM: 保留 currentChapterIndex + currentCharOffset
-    VM->>Pag: paginateBook(chapters, newCfg, w, h)
-    Pag->>Eng: paginate(...) 逐章分块
-    Eng-->>Pag: pages
-    VM->>VM: 由同一 charOffset 重算 globalPage
-    VM-->>RS: Ready(updated pages, 同 offset)
-    RS->>RS: 重排并滚动到同偏移页（不回第 0 页）
-
-%% ── ③ 书签增删 ──
-sequenceDiagram
-    participant U as User
-    participant BS as BookmarkSheet
-    participant VM as ReaderViewModel
-    participant Repo as BookmarkRepository
-
-    U->>BS: 添加书签（当前页）
-    BS->>VM: addBookmark(chapter, page, charOffset, preview)
-    VM->>Repo: insert(BookmarkEntity)
-    Repo-->>VM: done
-    VM-->>BS: 刷新列表
-    U->>BS: 删除书签
-    BS->>VM: removeBookmark(id)
-    VM->>Repo: delete(id)
-
-%% ── ④ 全文搜索 → 跳转 ──
-sequenceDiagram
-    participant U as User
-    participant SS as SearchSheet
-    participant VM as ReaderViewModel
-    participant SE as SearchEngine
-    participant RS as ReaderScreen
-
-    U->>SS: 输入关键词
-    SS->>VM: search(q)
-    VM->>SE: search(chapters, q)
-    SE-->>VM: List<SearchHit(chapter,charOffset,preview)>
-    VM-->>SS: 结果列表
-    U->>SS: 点击某命中
-    SS->>VM: jumpTo(chapter, charOffset)
-    VM->>VM: 设置 currentChapterIndex + offset
-    VM-->>RS: Ready(...) → pager 滚到目标页
-
-%% ── ⑤ 批量导入 → 解析 → 入库 ──
+%% ── ① EPUB 导入完整流程 ──
 sequenceDiagram
     participant U as User
     participant ID as ImportDialog
     participant IM as ImportManager
-    participant AE as ArchiveExtractor
-    participant ED as EncodingDetector
+    participant EP as EpubParser
+    participant ZF as ZipFile(java.util.zip)
+    participant XP as XmlPullParser
     participant Repo as BookRepository
+    participant FS as FileSystem(filesDir/cover/)
 
-    U->>ID: 选多文件/文件夹/zip,rar
-    ID->>IM: importUris(uris)
-    IM->>AE: extractArchivesIfNeeded()
-    AE-->>IM: List<File> txt/epub
-    loop 每个文件
-        IM->>ED: detect(path, defaultPref)
-        ED-->>IM: Charset
-        IM->>Repo: upsertBook(BookEntity(format,size,encoding))
+    U->>ID: 选择 .epub 文件
+    ID->>ID: copyUriToCache(content://uri) → /cache/imports/xxx.epub
+    ID->>IM: importArchives(["/cache/imports/xxx.epub"])
+    IM->>IM: ArchiveExtractor.extract() → 识别 .epub，不解压直接返回路径
+    IM->>IM: importFiles(paths) → 检测扩展名 ".epub"
+
+    Note over IM,EP: EPUB 解析开始
+    IM->>EP: parse(epubPath, UTF-8)
+    EP->>ZF: ZipFile(epubPath)
+    EP->>ZF: getEntry("META-INF/container.xml")
+    EP->>XP: 解析 container.xml → 获取 OPF 路径 (如 "OEBPS/content.opf")
+    EP->>ZF: getEntry("OEBPS/content.opf")
+    EP->>XP: 解析 OPF XML
+    Note over EP,XP: &lt;metadata&gt; → dc:title, dc:creator
+    Note over EP,XP: &lt;manifest&gt; → 所有 item (id, href, media-type)
+    Note over EP,XP: &lt;spine&gt; → itemref 顺序
+
+    EP->>EP: 查找 cover: manifest item 中 id 含 "cover" 或 properties="cover-image"
+    alt 找到封面
+        EP->>ZF: getEntry(coverHref) → 读取 bytes
+        EP-->>EP: coverImageBytes
+    else 无封面
+        EP-->>EP: coverImageBytes = null
     end
-    Repo-->>ID: 书籍已加入
-    ID-->>U: 书架刷新
 
-%% ── ⑥ WiFi 传书上传 → 入库 ──
+    loop 每个 spine itemref
+        EP->>ZF: getEntry(itemHref) → HTML 内容
+        EP->>EP: stripHtml(html) → 纯文本
+        EP->>EP: 检测章节标题 (h1-h6 / TOC 规则) → 切章
+        EP-->>EP: EpubChapter(title, content, charCount)
+    end
+
+    EP-->>IM: EpubParseResult(metadata, chapters)
+
+    Note over IM,FS: 封面保存
+    alt metadata.coverImageBytes != null
+        IM->>Repo: saveCoverImage(context, bookId, bytes)
+        Repo->>FS: write filesDir/cover/{bookId}.png
+        Repo-->>IM: coverUri = "file:///.../cover/{bookId}.png"
+    else 无封面
+        IM->>IM: coverUri = null (BookCover 将使用默认占位)
+    end
+
+    IM->>Repo: upsertBook(BookEntity(title=metadata.title, author=metadata.author, format="epub", coverUri=..., totalChapters=chapters.size, totalChars=...))
+    Repo-->>IM: done
+
+    IM-->>ID: count = 1
+    ID->>U: Snackbar "已导入 1 本"
+
+%% ── ② 阅读面板弹出/收起 ──
 sequenceDiagram
-    participant PC as 浏览器(PC)
-    participant WS as WifiServer(nanohttpd)
-    participant VM as WifiTransferViewModel
-    participant IM as ImportManager
-    participant Repo as BookRepository
+    participant U as User
+    participant RC as ReaderContent
+    participant RS as ReaderScreen
+    participant RT as ReaderTopBar
+    participant RB as ReaderBottomBar
+    participant CZ as ClickZoneHandler
 
-    PC->>WS: GET / → 上传页
-    WS-->>PC: wifi_upload.html
-    PC->>WS: POST /upload (multipart 文件)
-    WS->>VM: onUpload(tempFile, name)
-    VM->>IM: importFile(tempFile)
-    IM->>Repo: upsertBook(...)
-    VM-->>WS: 200 OK (json)
-    WS-->>PC: 成功
-    VM-->>Shelf: 刷新书架
+    Note over RS: 初始状态: isPanelVisible = false
+    Note over RC: TopBar/BottomBar 隐藏 (AnimatedVisibility.Gone)
+
+    U->>RC: 点击屏幕中间区域
+    RC->>CZ: detectTapGestures → zoneFromOffset(x/w, y/h)
+    CZ-->>RC: zone = CENTER
+    RC->>RS: onPanelToggle()
+    RS->>RS: isPanelVisible = !isPanelVisible → true
+    RS->>RT: AnimatedVisibility(visible=true) → slideInVertically
+    RS->>RB: AnimatedVisibility(visible=true) → slideInVertically
+    Note over RT,RB: 顶部栏和底部栏从屏幕边缘滑入，动画 300ms
+
+    Note over RT: 顶部栏显示: [←返回] 书名 [···]
+    Note over RB: 底部栏显示: [☀] [◀ 章节名 ▸] [排版]
+
+    U->>RT: 点击 [···] 溢出菜单
+    RT->>RT: DropdownMenu(搜索🔍, 书签🔖)
+    U->>RT: 点击 搜索🔍
+    RT->>RS: onSearch() → SearchSheet 弹出
+
+    U->>RB: 点击 ☀ 太阳图标
+    RB->>RB: DropdownMenu(亮度Slider, 背景色ChipRow, 日夜模式Switch)
+    U->>RB: 拖动亮度 Slider
+    RB->>RB: AppPrefs.setBrightness(value) → 实时生效
+
+    U->>RB: 点击 排版 键
+    RB->>RB: ModalBottomSheet(字号/边距/对齐/字体)
+    U->>RB: 调字号 Slider
+    RB->>RB: AppPrefs.setFontScale(value) → 触发 ReaderViewModel 重排
+
+    U->>RC: 再次点击屏幕中间
+    RC->>RS: onPanelToggle()
+    RS->>RS: isPanelVisible = false
+    RS->>RT: AnimatedVisibility(visible=false) → slideOutVertically
+    RS->>RB: AnimatedVisibility(visible=false) → slideOutVertically
+    Note over RC: 面板隐藏，阅读区全屏
+
+%% ── ③ 最近阅读去重 + 个人页展示 ──
+sequenceDiagram
+    participant U as User
+    participant MN as MainActivity(NavigationBar)
+    participant PS as ProfileScreen
+    participant Repo as BookRepository
+    participant DAO as ReadingHistoryDao
+    participant DB as Room DB
+
+    U->>MN: 点击"个人" Tab
+    MN->>PS: 显示 ProfileScreen
+
+    PS->>Repo: getDedupedRecentHistoryFlow()
+    Repo->>DAO: getDedupedRecentFlow()
+    DAO->>DB: SELECT ... LAG(bookId) OVER (...) ... LIMIT 10
+    DB-->>DAO: [h1(bookA), h3(bookB), h5(bookC)] (去重后)
+    DAO-->>Repo: List<ReadingHistoryEntity>
+    Repo->>Repo: 关联 BookEntity (bookDao.getBooksByIds)
+    Repo-->>PS: Flow<List<BookEntity>>
+
+    PS->>PS: LazyRow 展示 3 本最近阅读 (BookCover 卡片)
+    Note over PS: 去重效果: bookA 读了 3 次只显示 1 次
+
+    U->>PS: 点击 阅读统计 >
+    PS->>MN: navigateTo("stats")
+    MN->>StatsScreen: 显示阅读统计页
+
+    U->>PS: 点击 系统设置 >
+    PS->>MN: navigateTo("settings")
+    MN->>SettingsScreen: 显示设置页
+
+%% ── ④ TOC 规则全局化配置 ──
+sequenceDiagram
+    participant U as User
+    participant SS as SettingsScreen
+    participant TR as TocRuleSettingsScreen
+    participant Prefs as AppPrefs(DataStore)
+    participant TP as TxtParser
+
+    U->>SS: 设置页 → 点击 "目录规则 >"
+    SS->>TR: navigateTo("toc_rules")
+
+    TR->>Prefs: globalTocRules Flow
+    Prefs-->>TR: {"rule_chinese_num", "rule_arabic_num"}
+
+    TR->>TR: LazyColumn 列出 TocRules.ALL
+    Note over TR: [✓] 中文数字章 (rule_chinese_num)
+    Note over TR: [✓] 阿拉伯数字章 (rule_arabic_num)
+    Note over TR: [ ] 纯数字编号 (rule_numeric)
+
+    U->>TR: 关闭 "阿拉伯数字章" Switch
+    TR->>Prefs: setGlobalTocRules({"rule_chinese_num"})
+    Prefs-->>TR: 持久化
+
+    Note over TP: 下次打开任何 TXT 文件时
+    TP->>Prefs: 读取 globalTocRules
+    TP->>TP: parseWithRules(text, enabledRules) → 仅用中文数字章规则
