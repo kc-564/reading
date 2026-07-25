@@ -17,7 +17,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
@@ -154,7 +154,7 @@ private fun ProfileEntryRow(
             )
         }
         Icon(
-            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            imageVector = Icons.Filled.KeyboardArrowRight,
             contentDescription = null
         )
     }
@@ -164,6 +164,7 @@ private fun ProfileEntryRow(
  * Card used in the profile LazyRow for a recent book.
  * Shows cover thumbnail (coloured placeholder or image), title, and progress bar.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecentBookCard(
     book: BookEntity,
@@ -208,7 +209,7 @@ private fun RecentBookCard(
             Spacer(Modifier.height(4.dp))
             // Progress
             LinearProgressIndicator(
-                progress = { book.progressPercent.coerceIn(0f, 1f) },
+                progress = book.progressPercent.coerceIn(0f, 1f),
                 modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp))
             )
             Spacer(Modifier.height(2.dp))
