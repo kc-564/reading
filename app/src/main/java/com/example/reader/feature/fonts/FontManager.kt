@@ -39,7 +39,7 @@ class FontManager(private val context: Context) {
         if (fonts.isEmpty()) return FontFamily.Default
         val target = fonts.firstOrNull { it.id == importedId } ?: fonts.first()
         return runCatching {
-            FontFamily(Font(target.path))
+            FontFamily(Font(File(target.path)))
         }.getOrElse { FontFamily.Default }
     }
 
