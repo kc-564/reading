@@ -69,4 +69,25 @@
     <string name="tools_search">搜索</string>
     <string name="tools_highlight">高亮</string>
     <string name="tools_font_import">导入字体</string>
+
+    <!-- v1.1 Bottom Navigation -->
+    <string name="nav_shelf">书架</string>
+    <string name="nav_bookstore">书城</string>
+    <string name="nav_profile">个人</string>
+    <string name="bookstore_placeholder">书城即将推出</string>
+
+    <!-- v1.1 Profile -->
+    <string name="profile_title">个人</string>
+    <string name="profile_recent">最近阅读</string>
+    <string name="profile_stats_entry">阅读统计</string>
+    <string name="profile_settings_entry">系统设置</string>
+
+    <!-- v1.1 Settings -->
+    <string name="settings_title">系统设置</string>
+    <string name="settings_theme">主题模式</string>
+    <string name="settings_font">默认字体</string>
+    <string name="settings_toc_rules">目录规则</string>
+    <string name="settings_about">关于</string>
+    <string name="settings_about_version">阅读器 v1.1.0</string>
+    <string name="cover_default_desc">默认封面</string>
 </resources>
