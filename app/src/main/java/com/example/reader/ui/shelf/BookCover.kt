@@ -1,6 +1,7 @@
 package com.example.reader.ui.shelf
 
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +44,7 @@ import com.example.reader.db.BookEntity
  * @param onOpen   Open the reader for this book.
  * @param onMenu   Open the per-book overflow menu (edit / delete).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BookCover(
     book: BookEntity,

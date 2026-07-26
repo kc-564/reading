@@ -111,7 +111,7 @@ class ReaderViewModel(
                 var epubTitle: String? = null
                 var epubAuthor: String? = null
                 if (format == "epub") {
-                    val epubResult = EpubParser.parse(application, File(bookPath), bookPath)
+                    val epubResult = EpubParser.parse(getApplication(), File(bookPath), bookPath)
                     chapters = epubResult.chapters.map { ch ->
                         val lines = ch.content.split('\n')
                         Chapter(
