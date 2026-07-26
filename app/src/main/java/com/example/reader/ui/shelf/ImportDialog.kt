@@ -4,27 +4,33 @@ import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import com.example.reader.feature.import.ImportManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -33,6 +39,9 @@ import java.io.File
  * Lets the user pick multiple files (TXT / EPUB / ZIP / RAR) or an entire folder tree. Selected
  * documents are copied into the app cache (so SAF `content://` URIs become plain file paths),
  * then handed to [ImportManager.importArchives] which extracts archives and upserts books.
+ *
+ * Heavy work (copying files out of SAF + parsing) runs on [Dispatchers.IO] so the UI never
+ * blocks; a progress indicator is shown while importing.
  *
  * @param onImported Called with the number of successfully imported books.
  */
@@ -46,87 +55,94 @@ fun ImportDialog(
     val scope = rememberCoroutineScope()
     val importManager = remember { ImportManager(context) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var isImporting by remember { mutableStateOf(false) }
 
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        val paths = uris.mapNotNull { copyUriToCache(context, it) }
-        runImport(scope, importManager, paths, onImported, onDismiss)
+        scope.launch {
+            isImporting = true
+            val count = withContext(Dispatchers.IO) {
+                val paths = uris.mapNotNull { copyUriToCache(context, it) }
+                runCatching { importManager.importArchives(paths) }.getOrElse { 0 }
+            }
+            onImported(count)
+            onDismiss()
+        }
     }
 
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { treeUri: Uri? ->
         if (treeUri == null) return@rememberLauncherForActivityResult
-        val paths = collectTreePaths(context, treeUri)
-        runImport(scope, importManager, paths, onImported, onDismiss)
+        scope.launch {
+            isImporting = true
+            val count = withContext(Dispatchers.IO) {
+                val paths = collectTreePaths(context, treeUri)
+                runCatching { importManager.importArchives(paths) }.getOrElse { 0 }
+            }
+            onImported(count)
+            onDismiss()
+        }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    ModalBottomSheet(
+        onDismissRequest = { if (!isImporting) onDismiss() },
+        sheetState = sheetState
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
-                .padding(bottom = 24.dp)
+                .padding(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("导入书籍", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(12.dp))
-            Button(
-                onClick = {
-                    filePicker.launch("*/*")
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("选择文件 / 压缩包（可多选）") }
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = { folderPicker.launch(null) },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("选择文件夹") }
-            Spacer(Modifier.height(8.dp))
-            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("取消") }
+            if (isImporting) {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(8.dp))
+                Text("导入中…", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                Button(
+                    onClick = { filePicker.launch("*/*") },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("选择文件 / 压缩包（可多选）") }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { folderPicker.launch(null) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("选择文件夹") }
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("取消") }
+            }
         }
     }
 }
 
-private fun runImport(
-    scope: kotlinx.coroutines.CoroutineScope,
-    importManager: ImportManager,
-    paths: List<String>,
-    onImported: (Int) -> Unit,
-    onDismiss: () -> Unit
-) {
-    scope.launch {
-        val count = runCatching { importManager.importArchives(paths) }.getOrElse { 0 }
-        onImported(count)
-        onDismiss()
-    }
+/** Copies a `content://` document into the app cache and returns its file path, or null. */
+private suspend fun copyUriToCache(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
+    runCatching {
+        // Try to preserve the original filename from the SAF URI
+        val originalName = uri.lastPathSegment
+            ?.replace(Regex("[^\\w.\\-\\u4e00-\\u9fff]"), "_")
+            ?: "file"
+        val safeName = "imp_${System.nanoTime()}_$originalName"
+        val dir = File(context.cacheDir, "imports")
+        if (!dir.exists()) dir.mkdirs()
+        val target = File(dir, safeName)
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            target.outputStream().use { out -> input.copyTo(out) }
+        }
+        target.absolutePath
+    }.getOrNull()
 }
 
-/** Copies a `content://` document into the app cache and returns its file path, or null. */
-private fun copyUriToCache(context: Context, uri: Uri): String? = runCatching {
-    // Try to preserve the original filename from the SAF URI
-    val originalName = uri.lastPathSegment
-        ?.replace(Regex("[^\\w.\\-\\u4e00-\\u9fff]"), "_")
-        ?: "file"
-    val safeName = if (originalName.contains(".")) {
-        "imp_${System.nanoTime()}_$originalName"
-    } else {
-        "imp_${System.nanoTime()}_$originalName"
-    }
-    val dir = File(context.cacheDir, "imports")
-    if (!dir.exists()) dir.mkdirs()
-    val target = File(dir, safeName)
-    context.contentResolver.openInputStream(uri)?.use { input ->
-        target.outputStream().use { out -> input.copyTo(out) }
-    }
-    target.absolutePath
-}.getOrNull()
-
 /** Recursively collects TXT / ZIP / RAR / EPUB files under a document tree. */
-private fun collectTreePaths(context: Context, treeUri: Uri): List<String> {
+private suspend fun collectTreePaths(context: Context, treeUri: Uri): List<String> = withContext(Dispatchers.IO) {
     val result = mutableListOf<String>()
-    val tree = DocumentFile.fromTreeUri(context, treeUri) ?: return result
+    val tree = DocumentFile.fromTreeUri(context, treeUri) ?: return@withContext result
     val stack = ArrayDeque<DocumentFile>().apply { add(tree) }
     while (stack.isNotEmpty()) {
         val dir = stack.removeFirst()
@@ -143,5 +159,5 @@ private fun collectTreePaths(context: Context, treeUri: Uri): List<String> {
             }
         }
     }
-    return result
+    result
 }

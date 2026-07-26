@@ -57,7 +57,7 @@ object EpubParser {
                     val bytes = zip.getInputStream(coverEntry).readBytes()
                     val dir = File(context.filesDir, "cover")
                     if (!dir.exists()) dir.mkdirs()
-                    val safeId = java.net.URLEncoder.encode(bookId, "UTF-8")
+                    val safeId = hashBookId(bookId)
                     val coverFile = File(dir, "$safeId.png")
                     coverFile.writeBytes(bytes)
                     coverPath = coverFile.absolutePath
@@ -142,6 +142,7 @@ object EpubParser {
         var title = ""
         var author: String? = null
         var coverHref: String? = null
+        var coverMetaId: String? = null
         val manifest = mutableMapOf<String, ManifestItem>()
         val spine = mutableListOf<SpineItemref>()
 
@@ -165,6 +166,13 @@ object EpubParser {
                         }
                         inMetadata && (parser.name == "creator" || parser.name.endsWith(":creator")) -> {
                             author = parser.nextText().trim().takeIf { it.isNotBlank() }
+                        }
+                        inMetadata && parser.name == "meta" -> {
+                            val nameAttr = parser.getAttributeValue(null, "name")
+                            val contentAttr = parser.getAttributeValue(null, "content")
+                            if (nameAttr == "cover" && contentAttr != null) {
+                                coverMetaId = contentAttr
+                            }
                         }
                         inManifest && parser.name == "item" -> {
                             val id = parser.getAttributeValue(null, "id") ?: ""
@@ -207,6 +215,11 @@ object EpubParser {
         if (coverHref == null) {
             coverHref = manifest.values
                 .firstOrNull { it.mediaType.startsWith("image/") }?.href
+        }
+
+        // EPUB2: <meta name="cover" content="itemId"> points to a manifest item.
+        if (coverHref == null && coverMetaId != null) {
+            coverHref = manifest[coverMetaId]?.href
         }
 
         // If title is still empty, try dc:title namespace variant
@@ -295,6 +308,17 @@ object EpubParser {
         return result.replace("//", "/")
     }
 }
+
+    /**
+     * Builds a filesystem-safe, fixed-length id for cover filenames from an arbitrary
+     * book id (which may be a long file path). Uses SHA-256 hex to avoid over-long
+     * filenames produced by URL-encoding full paths.
+     */
+    private fun hashBookId(bookId: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(bookId.toByteArray(Charsets.UTF_8))
+        return hash.joinToString("") { "%02x".format(it) }
+    }
 
 // ── Public data classes ──
 

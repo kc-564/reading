@@ -42,7 +42,10 @@ import com.example.reader.ui.theme.ClickZoneAction
 import com.example.reader.feature.clickzone.ClickZoneHandler
 import com.example.reader.feature.fonts.FontManager
 import com.example.reader.ui.theme.readerColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withContext
 
 /**
  * Core reader surface: paginated pager + tap zones + volume keys + RTL + animation.
@@ -100,17 +103,21 @@ fun ReaderContent(
         // (Re)paginate when chapters / style / size change.
         LaunchedEffect(state.chapters, styleConfig, maxWidthPx, maxHeightPx) {
             if (state.chapters.isNotEmpty() && maxWidthPx > 0 && maxHeightPx > 0) {
-                val bp = ReaderPagination().paginateBook(
-                    chapters = state.chapters,
-                    style = textStyle,
-                    maxWidthPx = maxWidthPx,
-                    maxHeightPx = maxHeightPx,
-                    cfg = styleConfig,
-                    measurer = measurer,
-                    cache = viewModel.layoutCache,
-                    bookId = viewModel.bookId,
-                    fingerprint = viewModel.fingerprint()
-                )
+                // Measure + paginate on a background thread so the UI never freezes on a
+                // large book (TextMeasurer.measure is safe to call off the main thread).
+                val bp = withContext(Dispatchers.Default) {
+                    ReaderPagination().paginateBook(
+                        chapters = state.chapters,
+                        style = textStyle,
+                        maxWidthPx = maxWidthPx,
+                        maxHeightPx = maxHeightPx,
+                        cfg = styleConfig,
+                        measurer = measurer,
+                        cache = viewModel.layoutCache,
+                        bookId = viewModel.bookId,
+                        fingerprint = viewModel.fingerprint()
+                    )
+                }
                 viewModel.applyPagination(bp)
             }
         }

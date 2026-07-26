@@ -2,7 +2,7 @@ package com.example.reader.ui.shelf
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,13 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -63,9 +58,12 @@ fun BookCover(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(3f / 4f)
-                .clip(RoundedCornerShape(6.dp))
-                .background(placeholderColor)
-                .clickable(onClick = onOpen),
+            .clip(RoundedCornerShape(6.dp))
+            .background(placeholderColor)
+            .combinedClickable(
+                onClick = onOpen,
+                onLongClick = onMenu
+            ),
             contentAlignment = Alignment.Center
         ) {
             if (bitmap != null) {
@@ -81,16 +79,6 @@ fun BookCover(
                     style = MaterialTheme.typography.headlineMedium,
                     color = Color.White
                 )
-            }
-            // Overflow menu anchored to the top-end of the cover.
-            Box(modifier = Modifier.fillMaxSize().padding(2.dp), contentAlignment = Alignment.TopEnd) {
-                IconButton(onClick = onMenu, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        Icons.Filled.MoreVert,
-                        contentDescription = "更多操作",
-                        tint = Color.White
-                    )
-                }
             }
         }
         Spacer(Modifier.height(4.dp))

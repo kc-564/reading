@@ -8,6 +8,7 @@ import com.example.reader.parser.EncodingDetector
 import com.example.reader.parser.EpubParser
 import com.example.reader.parser.LruEncodingCache
 import com.example.reader.parser.TxtParser
+import com.example.reader.parser.sanitizeBookTitle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -50,7 +51,7 @@ class ImportManager(private val context: Context) {
                         bookId = path,
                         filePath = path,
                         fileName = file.name,
-                        title = result.metadata.title.ifBlank { file.nameWithoutExtension },
+                        title = sanitizeBookTitle(result.metadata.title.ifBlank { file.nameWithoutExtension }),
                         author = result.metadata.author,
                         coverUri = coverPath,
                         format = "epub",
@@ -77,7 +78,7 @@ class ImportManager(private val context: Context) {
                         bookId = path,
                         filePath = path,
                         fileName = file.name,
-                        title = file.nameWithoutExtension,
+                        title = sanitizeBookTitle(file.nameWithoutExtension),
                         format = file.extension.lowercase().ifBlank { "txt" },
                         sizeBytes = file.length(),
                         encoding = encoding.name(),

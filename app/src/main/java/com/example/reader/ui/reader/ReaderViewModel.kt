@@ -18,9 +18,12 @@ import com.example.reader.engine.ReaderStyleConfig
 import com.example.reader.feature.search.SearchEngine
 import com.example.reader.feature.search.SearchHit
 import com.example.reader.feature.stats.ReadingStatsTracker
+import com.example.reader.parser.Chapter
 import com.example.reader.parser.EncodingDetector
+import com.example.reader.parser.EpubParser
 import com.example.reader.parser.LruEncodingCache
 import com.example.reader.parser.TxtParser
+import com.example.reader.parser.sanitizeBookTitle
 import com.example.reader.prefs.AppPrefs
 import com.example.reader.util.FileFingerprint
 import kotlinx.coroutines.Dispatchers
@@ -92,19 +95,49 @@ class ReaderViewModel(
     private fun loadBook() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val defaultPref = prefs.defaultEncoding.first()
-                val encoding: Charset = encodingCache.getOrPut(bookPath, defaultPref) {
-                    EncodingDetector.detect(bookPath, defaultPref) ?: StandardCharsets.UTF_8
+                val existingBook = repository.getBook(bookPath)
+
+                // Determine the book format: prefer the stored format, else infer from extension.
+                val format = if (existingBook != null) {
+                    existingBook.format
+                } else {
+                    val file = File(bookPath)
+                    if (file.extension.equals("epub", true)) "epub" else file.extension.lowercase().ifBlank { "txt" }
                 }
 
-                val chapters = parser.parse(bookPath, encoding)
+                // Parse chapters according to the book format.
+                var chapters: List<Chapter> = emptyList()
+                var encodingName = StandardCharsets.UTF_8.name()
+                var epubTitle: String? = null
+                var epubAuthor: String? = null
+                if (format == "epub") {
+                    val epubResult = EpubParser.parse(application, File(bookPath), bookPath)
+                    chapters = epubResult.chapters.map { ch ->
+                        val lines = ch.content.split('\n')
+                        Chapter(
+                            title = ch.title,
+                            startLineIndex = 0,
+                            lineCount = lines.size,
+                            contentLines = lines
+                        )
+                    }
+                    epubTitle = epubResult.metadata.title
+                    epubAuthor = epubResult.metadata.author
+                } else {
+                    val defaultPref = prefs.defaultEncoding.first()
+                    val encoding: Charset = encodingCache.getOrPut(bookPath, defaultPref) {
+                        EncodingDetector.detect(bookPath, defaultPref) ?: StandardCharsets.UTF_8
+                    }
+                    chapters = parser.parse(bookPath, encoding)
+                    encodingName = encoding.name()
+                }
+
                 if (chapters.isEmpty()) {
                     _uiState.value = ReaderUiState.Error("无法读取文件或文件为空")
                     return@launch
                 }
 
                 val totalChars = chapters.sumOf { it.totalCharCount.toLong() }
-                val existingBook = repository.getBook(bookPath)
                 val (chapterIndex, charOffset) = if (existingBook != null) {
                     existingBook.lastChapterIndex.coerceIn(0, chapters.size - 1) to existingBook.lastCharOffset
                 } else {
@@ -113,10 +146,14 @@ class ReaderViewModel(
                         bookId = bookPath,
                         filePath = bookPath,
                         fileName = file.name,
-                        title = file.nameWithoutExtension,
-                        format = "txt",
+                        title = sanitizeBookTitle(
+                            if (format == "epub" && !epubTitle.isNullOrBlank()) epubTitle!!
+                            else file.nameWithoutExtension
+                        ),
+                        author = if (format == "epub") epubAuthor else null,
+                        format = format,
                         sizeBytes = file.length(),
-                        encoding = encoding.name(),
+                        encoding = encodingName,
                         lastOpenedAt = System.currentTimeMillis(),
                         totalChapters = chapters.size,
                         totalChars = totalChars
@@ -137,7 +174,7 @@ class ReaderViewModel(
                     currentChapterIndex = chapterIndex,
                     currentCharOffset = charOffset,
                     totalChars = totalChars,
-                    encoding = encoding.name(),
+                    encoding = encodingName,
                     styleConfig = ReaderStyleConfig(),
                     perChapterPageCounts = emptyList(),
                     totalPages = 0,
