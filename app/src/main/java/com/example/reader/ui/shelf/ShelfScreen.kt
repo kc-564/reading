@@ -177,9 +177,13 @@ fun ShelfScreen(
     if (showImport) {
         ImportDialog(
             onDismiss = { showImport = false },
-            onImported = { count ->
+            onImported = { result ->
                 scope.launch {
-                    snackbarHostState.showSnackbar("已导入 $count 本")
+                    val msg = if (result.skipped > 0)
+                        "已导入 ${result.imported} 本，跳过重复 ${result.skipped} 本"
+                    else
+                        "已导入 ${result.imported} 本"
+                    snackbarHostState.showSnackbar(msg)
                 }
             }
         )

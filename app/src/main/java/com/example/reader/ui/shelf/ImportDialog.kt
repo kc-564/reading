@@ -2,6 +2,7 @@ package com.example.reader.ui.shelf
 
 import android.content.Context
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -28,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import com.example.reader.feature.import.ImportManager
+import com.example.reader.feature.import.ImportResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -41,15 +43,16 @@ import java.io.File
  * then handed to [ImportManager.importArchives] which extracts archives and upserts books.
  *
  * Heavy work (copying files out of SAF + parsing) runs on [Dispatchers.IO] so the UI never
- * blocks; a progress indicator is shown while importing.
+ * blocks; a progress indicator is shown while importing. When books are skipped because they
+ * were already imported, a [Toast] informs the user ("已导入 N 本，已跳过重复 M 本").
  *
- * @param onImported Called with the number of successfully imported books.
+ * @param onImported Called with the [ImportResult] (imported / skipped counts).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImportDialog(
     onDismiss: () -> Unit,
-    onImported: (Int) -> Unit
+    onImported: (ImportResult) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -57,17 +60,35 @@ fun ImportDialog(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var isImporting by remember { mutableStateOf(false) }
 
+    /** Runs the import, shows a toast for duplicates, and forwards the result to [onImported]. */
+    suspend fun runImport(paths: List<String>): ImportResult {
+        val result = withContext(Dispatchers.IO) {
+            runCatching { importManager.importArchives(paths) }.getOrElse { ImportResult(0, 0) }
+        }
+        if (result.imported > 0 && result.skipped > 0) {
+            Toast.makeText(
+                context,
+                "已导入 ${result.imported} 本，已跳过重复 ${result.skipped} 本",
+                Toast.LENGTH_LONG
+            ).show()
+        } else if (result.skipped > 0) {
+            Toast.makeText(context, "已跳过重复 ${result.skipped} 本", Toast.LENGTH_LONG).show()
+        } else if (result.imported > 0) {
+            Toast.makeText(context, "已导入 ${result.imported} 本", Toast.LENGTH_SHORT).show()
+        }
+        return result
+    }
+
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         scope.launch {
             isImporting = true
-            val count = withContext(Dispatchers.IO) {
-                val paths = uris.mapNotNull { copyUriToCache(context, it) }
-                runCatching { importManager.importArchives(paths) }.getOrElse { 0 }
-            }
-            onImported(count)
+            val paths = withContext(Dispatchers.IO) { uris.mapNotNull { copyUriToCache(context, it) } }
+            val result = runImport(paths)
+            isImporting = false
+            onImported(result)
             onDismiss()
         }
     }
@@ -78,11 +99,10 @@ fun ImportDialog(
         if (treeUri == null) return@rememberLauncherForActivityResult
         scope.launch {
             isImporting = true
-            val count = withContext(Dispatchers.IO) {
-                val paths = collectTreePaths(context, treeUri)
-                runCatching { importManager.importArchives(paths) }.getOrElse { 0 }
-            }
-            onImported(count)
+            val paths = withContext(Dispatchers.IO) { collectTreePaths(context, treeUri) }
+            val result = runImport(paths)
+            isImporting = false
+            onImported(result)
             onDismiss()
         }
     }

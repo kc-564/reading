@@ -8,20 +8,29 @@ import java.security.MessageDigest
  * Reads/writes pagination results to the [LayoutCacheEntity] table (C07).
  *
  * The cached payload is *only* the per-chapter character ranges (compact JSON), never the
- * full text. The cache key is `sha1(fingerprint + layoutHash + screenSize)`; [themeMode] is
- * intentionally excluded from [ReaderStyleConfig.layoutHash] so a theme switch does not
- * invalidate a perfectly good layout.
+ * full text. The cache key is `sha1(SCHEMA + fingerprint + layoutHash + screenSize)`;
+ * [themeMode] is intentionally excluded from [ReaderStyleConfig.layoutHash] so a theme switch
+ * does not invalidate a perfectly good layout.
+ *
+ * [SCHEMA] is bumped whenever the pagination *algorithm* changes in a way that makes old
+ * cached ranges invalid (e.g. the EPUB single-line fix that turned one unbreakable block per
+ * chapter into proper multi-paragraph pages). Bumping it invalidates every prior entry so
+ * books re-paginate once with the corrected logic and then cache correctly — a self-healing
+ * migration that needs no DB schema change.
  *
  * All read/write paths are wrapped in `runCatching` by callers; a corrupt entry is treated
  * as a miss and the caller re-paginates (self-healing).
  */
 class LayoutCache(private val dao: LayoutCacheDao) {
 
+    /** Bumped when the pagination algorithm changes in a way that invalidates old ranges. */
+    private const val SCHEMA = "v2"
+
     /**
      * Builds the cache key.
      */
     fun buildKey(fingerprint: String, cfg: ReaderStyleConfig, maxWidthPx: Int, maxHeightPx: Int): String {
-        val raw = "$fingerprint|${cfg.layoutHash()}|${maxWidthPx}x${maxHeightPx}"
+        val raw = "$SCHEMA|$fingerprint|${cfg.layoutHash()}|${maxWidthPx}x${maxHeightPx}"
         return sha1(raw)
     }
 

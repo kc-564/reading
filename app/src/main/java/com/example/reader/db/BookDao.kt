@@ -19,6 +19,9 @@ interface BookDao {
     @Query("SELECT * FROM books WHERE bookId = :bookId")
     suspend fun getBook(bookId: String): BookEntity?
 
+    @Query("SELECT bookId FROM books WHERE content_fingerprint = :fp LIMIT 1")
+    suspend fun getBookIdByFingerprint(fp: String): String?
+
     @Query("SELECT * FROM books WHERE bookId = :bookId")
     fun getBookFlow(bookId: String): Flow<BookEntity?>
 

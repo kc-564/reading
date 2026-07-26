@@ -10,6 +10,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * - Adds `author` / `cover_uri` / `is_read` columns to the existing `books` table.
  * - Creates `bookmarks`, `reading_sessions`, `toc_rule_prefs`, `highlights`, `layout_cache`.
  *
+ * Migration 3 -> 4 (duplicate detection):
+ * - Adds a nullable `content_fingerprint` column to `books` used to skip re-importing a book
+ *   whose file content already exists in the library.
+ *
  * All new columns are nullable or have a NOT NULL DEFAULT so existing rows migrate
  * without data loss. The destructive fallback in [AppDatabase] remains as a safety net.
  */
@@ -95,5 +99,16 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
             )
             """.trimIndent()
         )
+    }
+}
+
+/**
+ * Migration 3 -> 4: adds the `content_fingerprint` column used for duplicate-import detection.
+ * The column is nullable so existing rows migrate without data loss (they simply have no
+ * fingerprint until the next time they are re-imported/updated).
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE books ADD COLUMN content_fingerprint TEXT")
     }
 }

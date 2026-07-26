@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.reader.R
 import com.example.reader.feature.import.ImportManager
+import com.example.reader.feature.import.ImportResult
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoHTTPD.Method
@@ -60,17 +61,17 @@ class WifiServer(port: Int, context: Context) : NanoHTTPD(port) {
         session.parseBody(files)
         val paths = files.values.filter { it.isNotBlank() && File(it).exists() }
         val count = if (paths.isNotEmpty()) {
-            runBlocking { runCatching { importManager.importArchives(paths) }.getOrDefault(0) }
+            runBlocking { runCatching { importManager.importArchives(paths) }.getOrDefault(ImportResult(0, 0)) }
         } else {
-            0
+            ImportResult(0, 0)
         }
-        lastImportedCount = count
+        lastImportedCount = count.imported
         val body = """
             <!DOCTYPE html><html><head><meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1">
             <title>导入完成</title></head>
             <body style="font-family:sans-serif;text-align:center;margin-top:48px;color:#333">
-            <h3>导入完成：$count 本</h3>
+            <h3>导入完成：${count.imported} 本</h3>
             <p><a href="/">继续上传</a></p>
             </body></html>
         """.trimIndent()

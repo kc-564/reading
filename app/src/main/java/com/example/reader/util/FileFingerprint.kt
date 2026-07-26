@@ -54,6 +54,30 @@ object FileFingerprint {
         return bytesToHex(digest.digest())
     }
 
+    /**
+     * Computes a *cheap content fingerprint* for duplicate detection. It is the SHA-256 of the
+     * first 1 MB of the file concatenated with the total file length, so it is stable for
+     * identical books yet never reads a whole (possibly huge) file — avoiding import stalls.
+     *
+     * Two files that share a 1 MB prefix but differ in total length are correctly treated as
+     * different books because the length is folded into the hash.
+     */
+    fun contentFingerprint(file: File): String {
+        val digest = MessageDigest.getInstance(ALGORITHM)
+        val buffer = ByteArray(8192)
+        var remaining = 1024L * 1024L
+        FileInputStream(file).use { input ->
+            var bytesRead: Int
+            while (remaining > 0 && input.read(buffer).also { bytesRead = it } != -1) {
+                val len = if (bytesRead.toLong() <= remaining) bytesRead else remaining.toInt()
+                digest.update(buffer, 0, len)
+                remaining -= len
+            }
+        }
+        digest.update(file.length().toString().toByteArray(Charsets.UTF_8))
+        return bytesToHex(digest.digest())
+    }
+
     private fun bytesToHex(bytes: ByteArray): String {
         val hexChars = CharArray(bytes.size * 2)
         for (i in bytes.indices) {

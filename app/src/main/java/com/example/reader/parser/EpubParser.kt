@@ -247,20 +247,44 @@ object EpubParser {
     // ── HTML → plain text ──
 
     /**
-     * Strips HTML tags and decodes entities to produce plain text.
-     * Uses regex for tag removal + [android.text.Html] for entity decoding.
+     * Strips HTML tags and decodes entities to produce plain text **with paragraph breaks**.
+     *
+     * Unlike a naïve tag-strip that collapses everything into one line (which made the
+     * paginator treat an entire chapter as a single un-pageable block), block-level elements
+     * and `<br>` are converted into newline separators so the downstream [ParagraphSplitter]
+     * can split the chapter into real paragraphs and the layout engine can paginate it
+     * normally across many pages.
+     *
+     * Uses regex for structural replacement + [android.text.Html] for entity decoding.
      */
     private fun htmlToPlainText(html: String): String {
-        // Remove script/style blocks
-        val noScripts = html
-            .replace(Regex("<script[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<style[^>]*>[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), "")
-        // Strip all HTML tags
-        val stripped = noScripts.replace(Regex("<[^>]*>"), " ")
-        // Decode HTML entities
-        return Html.fromHtml(stripped, Html.FROM_HTML_MODE_LEGACY).toString()
-            .replace(Regex("\\s+"), " ")
-            .trim()
+        var text = html
+        // Remove script/style blocks entirely.
+        text = text
+            .replace(Regex("<script[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("<style[^>]*>[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), " ")
+        // Convert break tags into paragraph separators.
+        text = text.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+        // Convert block-closing tags into paragraph separators (a paragraph boundary).
+        text = text.replace(
+            Regex("</(p|div|li|tr|blockquote|h[1-6]|pre|section|article)>", RegexOption.IGNORE_CASE),
+            "\n"
+        )
+        // Convert block-opening tags into paragraph separators as well (helps <p>…</p>).
+        text = text.replace(
+            Regex("<(p|div|li|tr|blockquote|h[1-6]|pre|section|article)[^>]*>", RegexOption.IGNORE_CASE),
+            "\n"
+        )
+        // Strip any remaining (inline) tags.
+        text = text.replace(Regex("<[^>]*>"), " ")
+        // Decode HTML entities (also collapses entity-wrapped whitespace reasonably).
+        text = Html.fromHtml(text, Html.FROM_HTML_MODE_LEGACY).toString()
+        // Normalise whitespace: collapse runs of spaces/tabs, keep newlines, then collapse
+        // 3+ newlines into a single blank line and trim.
+        text = text.replace(Regex("[ \t]+"), " ")
+        text = text.replace(Regex(" *\n *"), "\n")
+        text = text.replace(Regex("\n{3,}"), "\n\n")
+        return text.trim()
     }
 
     /** Extracts a title from HTML <title> or first heading tag. */

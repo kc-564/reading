@@ -103,7 +103,32 @@ fun ReaderBottomBar(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // ── Sun button → brightness / background / day-night ──
+            // ── TOC button (目录) — leftmost ──
+            IconButton(onClick = onToc) {
+                Icon(
+                    imageVector = Icons.Default.List,
+                    contentDescription = "目录",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            // ── Chapter info ──
+            Text(
+                text = "第${currentChapterIndex + 1}章/${totalChapters}章",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // ── Typesetting button → ModalBottomSheet ──
+            IconButton(onClick = { showTypesettingSheet = true }) {
+                Icon(
+                    imageVector = Icons.Default.FormatSize,
+                    contentDescription = "排版设置",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            // ── Sun button → brightness / background / day-night (亮度) — rightmost ──
             Box {
                 IconButton(onClick = { sunMenuExpanded = true }) {
                     Icon(
@@ -119,31 +144,6 @@ fun ReaderBottomBar(
                     themeMode = themeMode,
                     onBrightnessChange = { scope.launch { prefs.setBrightness(it) } },
                     onThemeModeChange = { scope.launch { prefs.setThemeMode(it) } }
-                )
-            }
-
-            // ── Chapter info ──
-            Text(
-                text = "第${currentChapterIndex + 1}章/${totalChapters}章",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            // ── TOC button ──
-            IconButton(onClick = onToc) {
-                Icon(
-                    imageVector = Icons.Default.List,
-                    contentDescription = "目录",
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
-            }
-
-            // ── Typesetting button → ModalBottomSheet ──
-            IconButton(onClick = { showTypesettingSheet = true }) {
-                Icon(
-                    imageVector = Icons.Default.FormatSize,
-                    contentDescription = "排版设置",
-                    tint = MaterialTheme.colorScheme.onSurface
                 )
             }
         }

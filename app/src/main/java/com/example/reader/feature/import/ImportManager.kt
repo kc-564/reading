@@ -9,6 +9,7 @@ import com.example.reader.parser.EpubParser
 import com.example.reader.parser.LruEncodingCache
 import com.example.reader.parser.TxtParser
 import com.example.reader.parser.sanitizeBookTitle
+import com.example.reader.util.FileFingerprint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -28,12 +29,26 @@ class ImportManager(private val context: Context) {
     private val parser = TxtParser()
     private val encodingCache = LruEncodingCache()
 
-    /** Imports a list of already-resolved file paths. Returns the number imported. */
-    suspend fun importFiles(paths: List<String>): Int = withContext(Dispatchers.IO) {
-        var count = 0
+    /**
+     * Imports a list of already-resolved file paths.
+     *
+     * @return An [ImportResult] with the number of books newly imported and the number skipped
+     *   because an identical book (matched by a cheap content fingerprint) is already present.
+     */
+    suspend fun importFiles(paths: List<String>): ImportResult = withContext(Dispatchers.IO) {
+        var imported = 0
+        var skipped = 0
         for (path in paths.distinct()) {
             val file = File(path)
             if (!file.exists() || file.isDirectory) continue
+
+            // Skip re-importing a book whose content already exists in the library.
+            val fp = runCatching { FileFingerprint.contentFingerprint(file) }.getOrNull()
+            if (fp != null && repository.existsByFingerprint(fp)) {
+                skipped++
+                continue
+            }
+
             when {
                 // EPUB branch — use EpubParser
                 file.extension.equals("epub", ignoreCase = true) -> {
@@ -54,6 +69,7 @@ class ImportManager(private val context: Context) {
                         title = sanitizeBookTitle(result.metadata.title.ifBlank { file.nameWithoutExtension }),
                         author = result.metadata.author,
                         coverUri = coverPath,
+                        contentFingerprint = fp,
                         format = "epub",
                         sizeBytes = file.length(),
                         encoding = StandardCharsets.UTF_8.name(),
@@ -62,7 +78,7 @@ class ImportManager(private val context: Context) {
                         totalChars = totalChars
                     )
                     repository.upsertBook(book)
-                    count++
+                    imported++
                 }
                 // TXT branch — existing logic
                 else -> {
@@ -79,6 +95,7 @@ class ImportManager(private val context: Context) {
                         filePath = path,
                         fileName = file.name,
                         title = sanitizeBookTitle(file.nameWithoutExtension),
+                        contentFingerprint = fp,
                         format = file.extension.lowercase().ifBlank { "txt" },
                         sizeBytes = file.length(),
                         encoding = encoding.name(),
@@ -87,17 +104,25 @@ class ImportManager(private val context: Context) {
                         totalChars = totalChars
                     )
                     repository.upsertBook(book)
-                    count++
+                    imported++
                 }
             }
         }
-        count
+        ImportResult(imported, skipped)
     }
 
     /** Extracts archives (zip/rar) then imports contained text/epub files. */
-    suspend fun importArchives(paths: List<String>): Int {
+    suspend fun importArchives(paths: List<String>): ImportResult {
         val extractor = ArchiveExtractor()
         val extracted = extractor.extract(paths)
         return importFiles(extracted)
     }
 }
+
+/**
+ * Result of an import pass.
+ *
+ * @property imported Number of books newly added to the library.
+ * @property skipped  Number of files skipped because an identical book was already present.
+ */
+data class ImportResult(val imported: Int, val skipped: Int)

@@ -42,6 +42,12 @@ class BookRepository(private val db: AppDatabase) {
 
     suspend fun getBook(bookId: String): BookEntity? = bookDao.getBook(bookId)
 
+    /**
+     * Returns true if a book with the given content fingerprint already exists in the library.
+     * Used to skip re-importing a file whose content is already present.
+     */
+    suspend fun existsByFingerprint(fp: String): Boolean = bookDao.getBookIdByFingerprint(fp) != null
+
     suspend fun upsertBook(book: BookEntity) = bookDao.upsertBook(book)
 
     suspend fun upsertBooks(books: List<BookEntity>) = bookDao.upsertBooks(books)

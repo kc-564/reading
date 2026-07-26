@@ -19,6 +19,7 @@ data class BookEntity(
     @ColumnInfo(name = "author") val author: String? = null,
     @ColumnInfo(name = "cover_uri") val coverUri: String? = null,
     @ColumnInfo(name = "is_read") val isRead: Boolean = false,
+    @ColumnInfo(name = "content_fingerprint") val contentFingerprint: String? = null,
     @ColumnInfo(name = "format") val format: String,
     val sizeBytes: Long,
     val encoding: String,
