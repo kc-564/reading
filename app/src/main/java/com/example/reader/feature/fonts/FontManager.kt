@@ -1,6 +1,7 @@
 package com.example.reader.feature.fonts
 
 import android.content.Context
+import android.graphics.Typeface
 import android.net.Uri
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -41,6 +42,30 @@ class FontManager(private val context: Context) {
         return runCatching {
             FontFamily(Font(File(target.path)))
         }.getOrElse { FontFamily.Default }
+    }
+
+    /**
+     * Resolves the configured [FontFamilyKey] to a native [Typeface] for use with
+     * [android.text.StaticLayout] (the native pagination / pre-render path in [PageRenderer]).
+     * Built-in families map directly to Android system font families; a custom (imported) family
+     * falls back to the first imported font file, then to the default.
+     */
+    fun resolveTypeface(key: FontFamilyKey, importedId: String? = null): Typeface {
+        return when (key) {
+            FontFamilyKey.DEFAULT -> Typeface.DEFAULT
+            FontFamilyKey.SANS -> Typeface.SANS_SERIF
+            FontFamilyKey.SERIF -> Typeface.SERIF
+            FontFamilyKey.MONOSPACE -> Typeface.MONOSPACE
+            FontFamilyKey.CUSTOM -> resolveCustomTypeface(importedId)
+        }
+    }
+
+    private fun resolveCustomTypeface(importedId: String?): Typeface {
+        val fonts = getImportedFonts()
+        if (fonts.isEmpty()) return Typeface.DEFAULT
+        val target = fonts.firstOrNull { it.id == importedId } ?: fonts.first()
+        return runCatching { Typeface.Builder(target.path).build() ?: Typeface.DEFAULT }
+            .getOrElse { Typeface.DEFAULT }
     }
 
     /** Lists imported font metadata persisted in [com.example.reader.prefs.AppPrefs]. */

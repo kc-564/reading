@@ -23,8 +23,14 @@ import java.security.MessageDigest
  */
 class LayoutCache(private val dao: LayoutCacheDao) {
 
-    /** Bumped when the pagination algorithm changes in a way that invalidates old ranges. */
-    private val SCHEMA = "v2"
+    /**
+     * Bumped to "v3" when pagination switched from Compose's [androidx.compose.ui.text.TextMeasurer]
+     * to Android's native [android.text.StaticLayout] (see [PageRenderer]). The two engines
+     * compute different character ranges for the same text, so every v2 cached range would
+     * otherwise resolve to mis-aligned / blank pages. Bumping the schema self-heals by
+     * re-paginating once with the new engine and then caching correctly.
+     */
+    private val SCHEMA = "v3"
 
     /**
      * Builds the cache key.

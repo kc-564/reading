@@ -1,7 +1,8 @@
 package com.example.reader.engine
 
-import androidx.compose.ui.text.TextMeasurer
+import android.graphics.Typeface
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Density
 import com.example.reader.parser.Chapter
 
 /**
@@ -15,6 +16,10 @@ import com.example.reader.parser.Chapter
  * - Honour the layout cache: when a cache entry exists it skips re-measurement and rebuilds
  *   pages from the stored character ranges.
  *
+ * The actual line-breaking + page cutting is delegated to [PageRenderer] (native
+ * [android.text.StaticLayout]); this class only wires chapters/paint together and preserves the
+ * [PageInfo] contract that every downstream consumer relies on.
+ *
  * Invariant: re-paginating after a style change keeps the *character offset*; callers must
  * use [globalPageOf] with the retained offset so reading never jumps back to page 0.
  */
@@ -26,6 +31,8 @@ class ReaderPagination {
      * @param cache        Optional layout cache; a hit skips measurement entirely.
      * @param bookId       Book id used when writing cache entries.
      * @param fingerprint  File fingerprint used to build the cache key.
+     * @param density      Density used to resolve `sp` to pixels for the native paint.
+     * @param typeface    Native [Typeface] pre-resolved from the configured font family.
      */
     suspend fun paginateBook(
         chapters: List<Chapter>,
@@ -33,7 +40,8 @@ class ReaderPagination {
         maxWidthPx: Int,
         maxHeightPx: Int,
         cfg: ReaderStyleConfig,
-        measurer: TextMeasurer,
+        density: Density,
+        typeface: Typeface,
         cache: LayoutCache? = null,
         bookId: String = "",
         fingerprint: String = ""
@@ -56,7 +64,7 @@ class ReaderPagination {
                 ChapterPages(idx, pages)
             }
         } else {
-            val engine = LayoutEngine(measurer)
+            val engine = LayoutEngine(density, typeface)
             chapters.mapIndexed { idx, ch ->
                 ChapterPages(idx, engine.paginate(ch.getContent(), style, maxWidthPx, maxHeightPx, cfg, idx))
             }
@@ -85,11 +93,13 @@ class ReaderPagination {
      * The cache fast-path is preserved: when a valid cache entry exists it rebuilds every
      * chapter's pages from the stored character ranges and still reports them incrementally.
      * When the cache misses, the whole book's ranges are written back at the end so the second
-     * open is instant (v2 cache).
+     * open is instant (v3 cache).
      *
      * @param onChapterReady Invoked on [kotlinx.coroutines.Dispatchers.Default] for every
      *        chapter (index-aligned). The receiver is responsible for switching to the main
      *        thread before mutating UI state.
+     * @param density      Density used to resolve `sp` to pixels for the native paint.
+     * @param typeface    Native [Typeface] pre-resolved from the configured font family.
      */
     suspend fun paginateBookIncremental(
         chapters: List<Chapter>,
@@ -97,7 +107,8 @@ class ReaderPagination {
         maxWidthPx: Int,
         maxHeightPx: Int,
         cfg: ReaderStyleConfig,
-        measurer: TextMeasurer,
+        density: Density,
+        typeface: Typeface,
         cache: LayoutCache? = null,
         bookId: String = "",
         fingerprint: String = "",
@@ -115,7 +126,7 @@ class ReaderPagination {
 
         if (!useCache) {
             // Cache miss (or no cache): measure each chapter and emit it as it completes.
-            val engine = LayoutEngine(measurer)
+            val engine = LayoutEngine(density, typeface)
             chapters.forEachIndexed { idx, ch ->
                 val pages = engine.paginate(ch.getContent(), style, maxWidthPx, maxHeightPx, cfg, idx)
                 rangesAcc.add(pages.map { it.startCharIndex to it.endCharIndex })
@@ -135,7 +146,7 @@ class ReaderPagination {
             }
         }
 
-        // Persist ranges only on a genuine miss so the next open is instant (v2 cache).
+        // Persist ranges only on a genuine miss so the next open is instant (v3 cache).
         if (cache != null && key != null && !useCache) {
             runCatching { cache.put(key, bookId, rangesAcc) }
         }
