@@ -133,7 +133,7 @@ class LayoutEngine(private val textMeasurer: TextMeasurer) {
             return
         }
         // Roughly how many equal pieces are needed for this paragraph to fit one-per-page.
-        val pieces = max(2, (h / usableHeight) + 1)
+        val pieces = maxOf(2, (h / usableHeight) + 1)
         val step = (p.text.length / pieces).coerceAtLeast(minStep)
         var start = 0
         while (start < p.text.length) {

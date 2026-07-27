@@ -46,7 +46,7 @@ object FileFingerprint {
         val digest = MessageDigest.getInstance(ALGORITHM)
         FileInputStream(file).use { input ->
             val buffer = ByteArray(8192)
-            var bytesRead: Int
+            var bytesRead = 0
             while (input.read(buffer).also { bytesRead = it } != -1) {
                 digest.update(buffer, 0, bytesRead)
             }
@@ -67,7 +67,7 @@ object FileFingerprint {
         val buffer = ByteArray(8192)
         var remaining = 1024L * 1024L
         FileInputStream(file).use { input ->
-            var bytesRead: Int
+            var bytesRead = 0
             while (remaining > 0 && input.read(buffer).also { bytesRead = it } != -1) {
                 val len = if (bytesRead.toLong() <= remaining) bytesRead else remaining.toInt()
                 digest.update(buffer, 0, len)

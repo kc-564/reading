@@ -24,7 +24,7 @@ import java.security.MessageDigest
 class LayoutCache(private val dao: LayoutCacheDao) {
 
     /** Bumped when the pagination algorithm changes in a way that invalidates old ranges. */
-    private const val SCHEMA = "v2"
+    private val SCHEMA = "v2"
 
     /**
      * Builds the cache key.
