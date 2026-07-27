@@ -74,6 +74,74 @@ class ReaderPagination {
     }
 
     /**
+     * Paginates the book **incrementally**, chapter by chapter.
+     *
+     * Unlike [paginateBook] (which waits for the entire book to be measured before returning),
+     * this function emits each chapter's pages via [onChapterReady] as soon as that chapter is
+     * measured. The UI can therefore render the first screen immediately while the remaining
+     * chapters keep paginating in the background — the core of the "first-screen-first" open
+     * optimisation.
+     *
+     * The cache fast-path is preserved: when a valid cache entry exists it rebuilds every
+     * chapter's pages from the stored character ranges and still reports them incrementally.
+     * When the cache misses, the whole book's ranges are written back at the end so the second
+     * open is instant (v2 cache).
+     *
+     * @param onChapterReady Invoked on [kotlinx.coroutines.Dispatchers.Default] for every
+     *        chapter (index-aligned). The receiver is responsible for switching to the main
+     *        thread before mutating UI state.
+     */
+    suspend fun paginateBookIncremental(
+        chapters: List<Chapter>,
+        style: TextStyle,
+        maxWidthPx: Int,
+        maxHeightPx: Int,
+        cfg: ReaderStyleConfig,
+        measurer: TextMeasurer,
+        cache: LayoutCache? = null,
+        bookId: String = "",
+        fingerprint: String = "",
+        onChapterReady: (chapterIndex: Int, pages: List<PageInfo>) -> Unit
+    ) {
+        val key = if (cache != null) cache.buildKey(fingerprint, cfg, maxWidthPx, maxHeightPx) else null
+        val cached = if (cache != null && key != null) {
+            runCatching { cache.get(key) }.getOrNull()
+        } else null
+
+        val useCache = cached != null && cached.size == chapters.size
+
+        // Accumulates per-chapter character ranges for the cache write (miss path only).
+        val rangesAcc = mutableListOf<List<Pair<Int, Int>>>()
+
+        if (!useCache) {
+            // Cache miss (or no cache): measure each chapter and emit it as it completes.
+            val engine = LayoutEngine(measurer)
+            chapters.forEachIndexed { idx, ch ->
+                val pages = engine.paginate(ch.getContent(), style, maxWidthPx, maxHeightPx, cfg, idx)
+                rangesAcc.add(pages.map { it.startCharIndex to it.endCharIndex })
+                onChapterReady(idx, pages)
+            }
+        } else if (cached != null) {
+            // Cache hit: rebuild pages from stored ranges, still emit them incrementally.
+            chapters.forEachIndexed { idx, ch ->
+                val content = ch.getContent()
+                val ranges = cached[idx]
+                val pages = ranges.map { (s, e) ->
+                    val end = e.coerceAtMost(content.length)
+                    val start = s.coerceAtMost(end)
+                    PageInfo(start, end, content.substring(start, end), idx)
+                }
+                onChapterReady(idx, pages)
+            }
+        }
+
+        // Persist ranges only on a genuine miss so the next open is instant (v2 cache).
+        if (cache != null && key != null && !useCache) {
+            runCatching { cache.put(key, bookId, rangesAcc) }
+        }
+    }
+
+    /**
      * Resolves the global (cross-chapter) page index for the given chapter + char offset.
      */
     fun globalPageOf(book: BookPagination, chapterIndex: Int, charOffset: Int): Int {

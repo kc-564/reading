@@ -101,12 +101,14 @@ fun ReaderContent(
         val maxHeightPx = with(density) { maxHeight.toPx().toInt() }
 
         // (Re)paginate when chapters / style / size change.
+        // v2: incremental pagination — each chapter is pushed to the screen the moment its
+        // pages are ready (no waiting for the whole book), so the first screen appears within
+        // ~1-2s and the remaining chapters keep paginating in the background.
         LaunchedEffect(state.chapters, styleConfig, maxWidthPx, maxHeightPx) {
             if (state.chapters.isNotEmpty() && maxWidthPx > 0 && maxHeightPx > 0) {
-                // Measure + paginate on a background thread so the UI never freezes on a
-                // large book (TextMeasurer.measure is safe to call off the main thread).
-                val bp = withContext(Dispatchers.Default) {
-                    ReaderPagination().paginateBook(
+                val paginationToken = viewModel.beginIncrementalPagination()
+                withContext(Dispatchers.Default) {
+                    ReaderPagination().paginateBookIncremental(
                         chapters = state.chapters,
                         style = textStyle,
                         maxWidthPx = maxWidthPx,
@@ -115,10 +117,16 @@ fun ReaderContent(
                         measurer = measurer,
                         cache = viewModel.layoutCache,
                         bookId = viewModel.bookId,
-                        fingerprint = viewModel.fingerprint()
+                        fingerprint = viewModel.fingerprint(),
+                        onChapterReady = { chapterIndex, pages ->
+                            // Drop callbacks from a superseded pagination pass (e.g. a rapid
+                            // style change) so only the latest pass populates the pager.
+                            if (viewModel.isActivePagination(paginationToken)) {
+                                viewModel.appendChapterPages(chapterIndex, pages)
+                            }
+                        }
                     )
                 }
-                viewModel.applyPagination(bp)
             }
         }
 

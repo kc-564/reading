@@ -11,7 +11,9 @@ import com.example.reader.data.StatsRepository
 import com.example.reader.db.AppDatabase
 import com.example.reader.db.BookEntity
 import com.example.reader.engine.BookPagination
+import com.example.reader.engine.ChapterPages
 import com.example.reader.engine.GlobalPage
+import com.example.reader.engine.PageInfo
 import com.example.reader.engine.LayoutCache
 import com.example.reader.engine.ReaderPagination
 import com.example.reader.engine.ReaderStyleConfig
@@ -87,6 +89,9 @@ class ReaderViewModel(
 
     /** Last computed pagination result, used to resolve global pages on jump. */
     private var lastPagination: BookPagination? = null
+
+    /** Accumulates per-chapter pages during an incremental pagination pass. */
+    private val _accChapters = mutableListOf<ChapterPages>()
 
     init {
         loadBook()
@@ -212,6 +217,82 @@ class ReaderViewModel(
             globalPages = flat,
             paginationVersion = state.paginationVersion + 1
         )
+    }
+
+    /**
+     * Monotonic token identifying the current incremental pagination pass. A superseded pass
+     * (e.g. a style change that re-triggered pagination before the previous one finished) is
+     * detected via [isActivePagination] so its late [appendChapterPages] callbacks are dropped
+     * instead of interleaving with the latest pass and corrupting the accumulated pages.
+     */
+    @Volatile
+    private var _paginationToken: Int = 0
+
+    /**
+     * Begins an incremental (chapter-by-chapter) pagination pass.
+     *
+     * Returns a pass token; callers must drop any [appendChapterPages] callback whose token no
+     * longer matches [isActivePagination], so a superseded re-pagination cannot interleave.
+     *
+     * Clears the accumulated chapter buffer. On a *re-pagination* (e.g. a style change) we
+     * re-seed it from the previous [BookPagination] so already-rendered pages stay visible and
+     * are overwritten chapter-by-chapter as the new layout arrives — avoiding a blank flash.
+     * On first open [lastPagination] is null, so the "正在排版…" mask stays up until chapter 0
+     * lands.
+     */
+    fun beginIncrementalPagination(): Int {
+        _accChapters.clear()
+        lastPagination?.let { _accChapters.addAll(it.chapters) }
+        return ++_paginationToken
+    }
+
+    /** True if [token] is the currently active pagination pass. */
+    fun isActivePagination(token: Int): Boolean = token == _paginationToken
+
+    /**
+     * Receives one chapter's freshly computed pages from
+     * [ReaderPagination.paginateBookIncremental] and folds them into the live UI state so the
+     * pager can render immediately without waiting for the rest of the book.
+     *
+     * This is invoked from [kotlinx.coroutines.Dispatchers.Default] (the pagination coroutine).
+     * The [BookPagination] maths run on that background thread; the
+     * [androidx.compose.runtime.State] write is dispatched to [kotlinx.coroutines.Dispatchers.Main]
+     * so Compose state is only mutated on the main thread.
+     */
+    fun appendChapterPages(chapterIndex: Int, pages: List<PageInfo>) {
+        val incoming = ChapterPages(chapterIndex, pages)
+        val existing = _accChapters.indexOfFirst { it.chapterIndex == chapterIndex }
+        if (existing >= 0) _accChapters[existing] = incoming else _accChapters.add(incoming)
+
+        // Build the partial BookPagination from everything paginated so far.
+        val chapterPagesSnapshot = ArrayList(_accChapters)
+        val perChapterPageCounts = chapterPagesSnapshot.map { it.pages.size }
+        val totalPages = perChapterPageCounts.sum()
+        val bp = BookPagination(chapterPagesSnapshot, perChapterPageCounts, totalPages)
+
+        val state = _uiState.value
+        if (state !is ReaderUiState.Ready) return
+        val cfg = _styleConfigValue()
+        val gPage = pagination.globalPageOf(bp, state.currentChapterIndex, state.currentCharOffset)
+        val percent = pagination.globalPercentOf(
+            bp, state.currentChapterIndex, state.currentCharOffset, state.totalChars
+        )
+        val flat: List<GlobalPage> = pagination.flatten(bp)
+        lastPagination = bp
+
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            val s = _uiState.value
+            if (s !is ReaderUiState.Ready) return@launch
+            _uiState.value = s.copy(
+                styleConfig = cfg,
+                perChapterPageCounts = bp.perChapterPageCounts,
+                totalPages = bp.totalPages,
+                currentGlobalPage = gPage,
+                globalPercent = percent,
+                globalPages = flat,
+                paginationVersion = s.paginationVersion + 1
+            )
+        }
     }
 
     /** Current style config value (read outside composition). */
