@@ -27,15 +27,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.LayoutDirection
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.toPx
+import androidx.compose.ui.unit.*
 import androidx.compose.ui.draw.paint
 import com.example.reader.R
 import com.example.reader.db.HighlightEntity
@@ -52,8 +51,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
-import kotlin.math.maxOf
-import kotlin.math.minOf
+import kotlin.comparisons.maxOf
+import kotlin.comparisons.minOf
 
 /**
  * Core reader surface: a pre-baked Bitmap pager + tap zones + volume keys + RTL + animation.

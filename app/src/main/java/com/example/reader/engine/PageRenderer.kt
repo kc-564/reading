@@ -7,10 +7,13 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.toPx
-import kotlin.math.maxOf
+import androidx.compose.ui.unit.*
+import kotlin.comparisons.maxOf
+
+/**
+ * Inclusive-exclusive character range of a single paginated page, in chapter-text coordinates.
+ */
+data class PageRange(val start: Int, val end: Int)
 
 /**
  * Native, GPU-friendly pagination + pre-rendering for the reader surface.
@@ -30,9 +33,6 @@ import kotlin.math.maxOf
  * cut out of the chapter — no clipped or overflowing lines.
  */
 object PageRenderer {
-
-    /** Inclusive-exclusive character range of a single paginated page, in chapter-text coordinates. */
-    data class PageRange(val start: Int, val end: Int)
 
     /**
      * Builds the [TextPaint] that drives [StaticLayout]. All sizes are resolved to **pixels**
