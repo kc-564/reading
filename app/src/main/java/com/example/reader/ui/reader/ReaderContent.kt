@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
@@ -38,6 +39,9 @@ import androidx.compose.ui.unit.*
 import androidx.compose.ui.draw.paint
 import com.example.reader.R
 import com.example.reader.db.HighlightEntity
+import com.example.reader.engine.BitmapCache
+import com.example.reader.engine.BitmapPool
+import com.example.reader.engine.PageKey
 import com.example.reader.engine.PageRange
 import com.example.reader.engine.PageRenderer
 import com.example.reader.engine.ReaderPagination
@@ -48,6 +52,7 @@ import com.example.reader.feature.fonts.FontManager
 import com.example.reader.ui.theme.ClickZoneAction
 import com.example.reader.ui.theme.readerColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -63,6 +68,12 @@ import kotlin.comparisons.minOf
  * (GPU-composited). Because the per-page text is measured exactly once and cached as an image,
  * turning a page is a pure image swap — no Compose `Text` re-measurement per frame — which
  * removes the jank the previous `TextMeasurer` + `BasicText` approach caused.
+ *
+ * Bitmap lifecycle (P0-1 / T01): a single [BitmapCache] (wrapping `LruCache<PageKey,Bitmap>` +
+ * [BitmapPool]) is the *only* owner of baked bitmaps, bounded by a device-tiered memory budget
+ * (§7.2). The Compose `StateMap<Int, ImageBitmap>` is just an observable *view*; when the cache
+ * evicts/recycles a page (window trim or [android.content.ComponentCallbacks2.onTrimMemory])
+ * the view entry is detached before any draw, so a recycled bitmap is never painted.
  *
  * Sliding sensitivity: [HorizontalPager.userScrollEnabled] is disabled and paging is driven by a
  * horizontal drag detector — a drag past [MIN_SWIPE] (≈15–20% of the screen width) flips one
@@ -95,7 +106,9 @@ fun ReaderContent(
     val themeColors = remember(styleConfig.themeMode) { readerColors(styleConfig.themeMode) }
 
     // Native typeface used by the StaticLayout-backed renderer (replaces the Compose TextMeasurer).
-    val typeface = remember(styleConfig.fontFamily) { fontManager.resolveTypeface(styleConfig.fontFamily) }
+    // resolveTypefaceWithFallback ensures imported fonts missing a script (e.g. CJK) still fall
+    // back to the system chain instead of rendering tofu (P1-4 / T05).
+    val typeface = remember(styleConfig.fontFamily) { fontManager.resolveTypefaceWithFallback(styleConfig.fontFamily) }
     // Paint is shared by pagination (character ranges) and baking (bitmap); it is only ever
     // read, never mutated, so it is safe to reuse across background render threads.
     val textColor = if (styleConfig.textureKey == "wood") Color.White else themeColors.onBackground
@@ -124,8 +137,16 @@ fun ReaderContent(
     val pagesState = rememberUpdatedState(pages)
     val globalPageState = rememberUpdatedState(state.currentGlobalPage)
 
-    // Pre-rendered page bitmaps, keyed by global page index. A bounded sliding window is
-    // maintained (see [bakeWindow]) so memory stays flat on long books.
+    // ── Bitmap cache (P0-1 / T01) ── the single source of truth for baked page bitmaps.
+    val bitmapCache = remember(context, viewModel) {
+        BitmapCache(context.applicationContext, viewModel.bitmapCacheBudgetBytes)
+    }
+    DisposableEffect(bitmapCache) {
+        onDispose { bitmapCache.dispose() }
+    }
+
+    // Pre-rendered page bitmaps, keyed by global page index. ONLY an observable view of the
+    // cache; evicted/recycled entries are detached here before any draw (see bakeWindow).
     val bitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -138,44 +159,64 @@ fun ReaderContent(
         val contentWidthPx = (maxWidthPx - 2 * marginPx).coerceAtLeast(1)
         val contentHeightPx = (maxHeightPx - 2 * verticalPx).coerceAtLeast(1)
 
+        // Immediate neighbourhood kept baked; BEYOND this the LRU trims.
+        val window = 2
+        // Idle pre-render look-ahead (P1-5 / T05): warm ±PRELOAD pages into the cache.
+        val preload = 4
+
         // Bakes a single page's bitmap off the main thread, then publishes it on the UI thread
         // (SnapshotState writes must happen on the main thread).
         suspend fun bakeOne(index: Int) {
             val ps = pagesState.value
             if (index < 0 || index >= ps.size) return
             if (bitmaps.containsKey(index)) return
+            val gen = state.paginationVersion
+            val key = PageKey(gen, index)
             val gp = ps[index]
             val chapter = state.chapters.getOrNull(gp.chapterIndex) ?: return
-            val bmp = withContext(Dispatchers.Default) {
-                PageRenderer.renderPageBitmap(
-                    text = chapter.getContent(),
-                    range = PageRange(gp.charStart, gp.charEnd),
-                    paint = paint,
-                    pageWidthPx = contentWidthPx,
-                    pageHeightPx = contentHeightPx,
-                    bgColor = bgColorArgb,
-                    cfg = styleConfig
-                )
+            // Render from the chapter's shared display spannable (indent / spacing / rich styles)
+            // so the baked bitmap matches pagination exactly; fall back to plain text if the
+            // display spannable for this chapter is not yet available.
+            val display = state.chapterLayouts[gp.chapterIndex] ?: chapter.getContent()
+            val rendered = withContext(Dispatchers.Default) {
+                bitmapCache.get(key) ?: run {
+                    val bmp = PageRenderer.renderPageBitmap(
+                        text = display,
+                        range = PageRange(gp.charStart, gp.charEnd),
+                        paint = paint,
+                        pageWidthPx = contentWidthPx,
+                        pageHeightPx = contentHeightPx,
+                        bgColor = bgColorArgb,
+                        cfg = styleConfig
+                    )
+                    bitmapCache.put(key, bmp)
+                    bmp
+                }
             }
             withContext(Dispatchers.Main.immediate) {
-                bitmaps[index] = bmp.asImageBitmap()
+                bitmaps[index] = rendered.asImageBitmap()
             }
         }
 
-        // Bakes the [WINDOW] pages around [center] and evicts pages far from it to bound memory.
-        val window = 2
+        // Bakes the [window] pages around [center] and trims the cache to bounds, detaching any
+        // recycled bitmap from the observable view so it is never drawn.
         suspend fun bakeWindow(center: Int) {
             val ps = pagesState.value
             if (ps.isEmpty()) return
             val from = maxOf(0, center - window)
             val to = minOf(ps.lastIndex, center + window)
             for (i in from..to) bakeOne(i)
+            // Recycle everything outside ±(window*3) — keeps the idle pre-render warm while the
+            // LRU budget bounds memory on very long books.
+            bitmapCache.evictOutsideWindow(center, window * 3)
             withContext(Dispatchers.Main.immediate) {
-                val it = bitmaps.keys.iterator()
-                while (it.hasNext()) {
-                    val k = it.next()
-                    if (k < center - window * 2 || k > center + window * 2) it.remove()
+                // Detach + recycle every bitmap the cache evicted, then drop any stale view entry.
+                bitmapCache.drainEvicted().forEach { (idx, bmp) ->
+                    bitmaps.remove(idx)
+                    BitmapPool.release(bmp)
                 }
+                val cached = bitmapCache.cachedIndices(state.paginationVersion)
+                bitmaps.keys.filter { it !in cached }.forEach { bitmaps.remove(it) }
             }
         }
 
@@ -197,9 +238,9 @@ fun ReaderContent(
                         cache = viewModel.layoutCache,
                         bookId = viewModel.bookId,
                         fingerprint = viewModel.fingerprint(),
-                        onChapterReady = { chapterIndex, pages ->
+                        onChapterReady = { chapterIndex, pages, display ->
                             if (viewModel.isActivePagination(paginationToken)) {
-                                viewModel.appendChapterPages(chapterIndex, pages)
+                                viewModel.appendChapterPages(chapterIndex, pages, display)
                             }
                         }
                     )
@@ -225,9 +266,12 @@ fun ReaderContent(
         }
 
         // Eager bake when the reader becomes ready or the style / size changes: clear the stale
-        // bitmaps and bake the resume position (plus chapter 0) so the first screen is instant.
+        // bitmaps AND the cache (old pagination generation → stale), then bake the resume
+        // position (plus chapter 0) so the first screen is instant.
         LaunchedEffect(state.styleConfig, contentWidthPx, contentHeightPx) {
             bitmaps.clear()
+            bitmapCache.clear()
+            bitmapCache.drainEvicted().forEach { (_, bmp) -> BitmapPool.release(bmp) }
             val target = globalPageState.value.coerceIn(0, (pagesState.value.lastIndex).coerceAtLeast(0))
             bakeWindow(target)
             if (target != 0) bakeWindow(0)
@@ -240,9 +284,21 @@ fun ReaderContent(
             bakeWindow(target)
         }
 
-        // When the visible page changes (flip / jump), bake its neighbourhood.
+        // When the visible page changes (flip / jump), bake its neighbourhood. After the page
+        // settles with no further scroll, idle pre-render the wider ±preload window into the LRU
+        // (P1-5 / T05). The delay is cancelled by rapid flips, so it naturally fires only on rest.
         LaunchedEffect(pagerState.currentPage) {
-            bakeWindow(pagerState.currentPage)
+            val center = pagerState.currentPage
+            bakeWindow(center)
+            delay(280)
+            if (pagerState.currentPage == center) {
+                val ps = pagesState.value
+                if (ps.isNotEmpty()) {
+                    val from = maxOf(0, center - preload)
+                    val to = minOf(ps.lastIndex, center + preload)
+                    for (i in from..to) bakeOne(i)
+                }
+            }
         }
 
         val rtl = styleConfig.rtl

@@ -4,6 +4,7 @@ import android.graphics.Typeface
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Density
 import com.example.reader.parser.Chapter
+import com.example.reader.util.ParagraphSplitter
 
 /**
  * Book-level pagination service (C01/C07).
@@ -46,7 +47,7 @@ class ReaderPagination {
         bookId: String = "",
         fingerprint: String = ""
     ): BookPagination {
-        val key = if (cache != null) cache.buildKey(fingerprint, cfg, maxWidthPx, maxHeightPx) else null
+        val key = if (cache != null) cache.buildKey(fingerprint, cfg.toSignature(), maxWidthPx, maxHeightPx) else null
         val cached = if (cache != null && key != null) {
             runCatching { cache.get(key) }.getOrNull()
         } else null
@@ -66,7 +67,11 @@ class ReaderPagination {
         } else {
             val engine = LayoutEngine(density, typeface)
             chapters.mapIndexed { idx, ch ->
-                ChapterPages(idx, engine.paginate(ch.getContent(), style, maxWidthPx, maxHeightPx, cfg, idx))
+                val text = ch.getContent()
+                val paragraphStarts = ParagraphSplitter.paragraphStartOffsets(text)
+                val spans = ch.richText?.spans ?: emptyList()
+                val result = engine.paginate(text, style, maxWidthPx, maxHeightPx, cfg, idx, spans, paragraphStarts)
+                ChapterPages(idx, result.pages)
             }
         }
 
@@ -96,8 +101,9 @@ class ReaderPagination {
      * open is instant (v3 cache).
      *
      * @param onChapterReady Invoked on [kotlinx.coroutines.Dispatchers.Default] for every
-     *        chapter (index-aligned). The receiver is responsible for switching to the main
-     *        thread before mutating UI state.
+     *        chapter (index-aligned) with the pages AND the shared display [CharSequence] used to
+     *        render them. The receiver is responsible for switching to the main thread before
+     *        mutating UI state.
      * @param density      Density used to resolve `sp` to pixels for the native paint.
      * @param typeface    Native [Typeface] pre-resolved from the configured font family.
      */
@@ -112,9 +118,9 @@ class ReaderPagination {
         cache: LayoutCache? = null,
         bookId: String = "",
         fingerprint: String = "",
-        onChapterReady: (chapterIndex: Int, pages: List<PageInfo>) -> Unit
+        onChapterReady: (chapterIndex: Int, pages: List<PageInfo>, display: CharSequence) -> Unit
     ) {
-        val key = if (cache != null) cache.buildKey(fingerprint, cfg, maxWidthPx, maxHeightPx) else null
+        val key = if (cache != null) cache.buildKey(fingerprint, cfg.toSignature(), maxWidthPx, maxHeightPx) else null
         val cached = if (cache != null && key != null) {
             runCatching { cache.get(key) }.getOrNull()
         } else null
@@ -128,9 +134,12 @@ class ReaderPagination {
             // Cache miss (or no cache): measure each chapter and emit it as it completes.
             val engine = LayoutEngine(density, typeface)
             chapters.forEachIndexed { idx, ch ->
-                val pages = engine.paginate(ch.getContent(), style, maxWidthPx, maxHeightPx, cfg, idx)
-                rangesAcc.add(pages.map { it.startCharIndex to it.endCharIndex })
-                onChapterReady(idx, pages)
+                val text = ch.getContent()
+                val paragraphStarts = ParagraphSplitter.paragraphStartOffsets(text)
+                val spans = ch.richText?.spans ?: emptyList()
+                val result = engine.paginate(text, style, maxWidthPx, maxHeightPx, cfg, idx, spans, paragraphStarts)
+                rangesAcc.add(result.pages.map { it.startCharIndex to it.endCharIndex })
+                onChapterReady(idx, result.pages, result.display)
             }
         } else if (cached != null) {
             // Cache hit: rebuild pages from stored ranges, still emit them incrementally.
@@ -142,7 +151,7 @@ class ReaderPagination {
                     val start = s.coerceAtMost(end)
                     PageInfo(start, end, content.substring(start, end), idx)
                 }
-                onChapterReady(idx, pages)
+                onChapterReady(idx, pages, content)
             }
         }
 

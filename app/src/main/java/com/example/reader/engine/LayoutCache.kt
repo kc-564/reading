@@ -8,15 +8,16 @@ import java.security.MessageDigest
  * Reads/writes pagination results to the [LayoutCacheEntity] table (C07).
  *
  * The cached payload is *only* the per-chapter character ranges (compact JSON), never the
- * full text. The cache key is `sha1(SCHEMA + fingerprint + layoutHash + screenSize)`;
- * [themeMode] is intentionally excluded from [ReaderStyleConfig.layoutHash] so a theme switch
- * does not invalidate a perfectly good layout.
+ * full text. The cache key is `sha1("$FORMATTING_VERSION_ID|$fingerprint|${signature.hash()}|${w}x${h}")`;
+ * [themeMode] and other non-layout fields are intentionally excluded from
+ * [ReaderStyleConfig.toSignature] so a theme switch does not invalidate a perfectly good layout.
  *
- * [SCHEMA] is bumped whenever the pagination *algorithm* changes in a way that makes old
- * cached ranges invalid (e.g. the EPUB single-line fix that turned one unbreakable block per
- * chapter into proper multi-paragraph pages). Bumping it invalidates every prior entry so
- * books re-paginate once with the corrected logic and then cache correctly — a self-healing
- * migration that needs no DB schema change.
+ * [FORMATTING_VERSION_ID] (mirrors FBReader's `FORMATTING_VERSION_ID`) is bumped only when the
+ * pagination *algorithm* itself changes. Any change to a layout-affecting field flows through
+ * [LayoutSignature.hash] and automatically misses the cache, so a font-size tweak re-paginates
+ * once and then caches correctly. Bumping the version id invalidates every prior entry at once
+ * (a self-healing migration that needs no DB schema change) — see [App] which purges stale rows
+ * on a version bump.
  *
  * All read/write paths are wrapped in `runCatching` by callers; a corrupt entry is treated
  * as a miss and the caller re-paginates (self-healing).
@@ -24,19 +25,16 @@ import java.security.MessageDigest
 class LayoutCache(private val dao: LayoutCacheDao) {
 
     /**
-     * Bumped to "v3" when pagination switched from Compose's [androidx.compose.ui.text.TextMeasurer]
-     * to Android's native [android.text.StaticLayout] (see [PageRenderer]). The two engines
-     * compute different character ranges for the same text, so every v2 cached range would
-     * otherwise resolve to mis-aligned / blank pages. Bumping the schema self-heals by
-     * re-paginating once with the new engine and then caching correctly.
+     * Builds the cache key from a [LayoutSignature]. Any layout-affecting field change yields a
+     * different key → automatic miss → re-pagination.
      */
-    private val SCHEMA = "v3"
-
-    /**
-     * Builds the cache key.
-     */
-    fun buildKey(fingerprint: String, cfg: ReaderStyleConfig, maxWidthPx: Int, maxHeightPx: Int): String {
-        val raw = "$SCHEMA|$fingerprint|${cfg.layoutHash()}|${maxWidthPx}x${maxHeightPx}"
+    fun buildKey(
+        fingerprint: String,
+        signature: LayoutSignature,
+        maxWidthPx: Int,
+        maxHeightPx: Int
+    ): String {
+        val raw = "${LayoutSignature.FORMATTING_VERSION_ID}|$fingerprint|${signature.hash()}|${maxWidthPx}x${maxHeightPx}"
         return sha1(raw)
     }
 
@@ -133,5 +131,10 @@ class LayoutCache(private val dao: LayoutCacheDao) {
             sb.append(((b.toInt() and 0xFF) + 0x100).toString(16).substring(1))
         }
         return sb.toString()
+    }
+
+    companion object {
+        /** Algorithm-level version id; mirrors [LayoutSignature.FORMATTING_VERSION_ID]. */
+        const val FORMATTING_VERSION_ID = LayoutSignature.FORMATTING_VERSION_ID
     }
 }

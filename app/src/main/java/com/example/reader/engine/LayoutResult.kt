@@ -26,6 +26,17 @@ data class ChapterPages(
 )
 
 /**
+ * Result of paginating one chapter: its pages plus the **display** [CharSequence] (the
+ * [android.text.SpannableString] carrying indent / spacing / rich-style spans) that both
+ * pagination and rendering consumed. Keeping the same instance guarantees pixel-identical pages.
+ */
+data class ChapterRender(
+    val chapterIndex: Int,
+    val pages: List<PageInfo>,
+    val display: CharSequence
+)
+
+/**
  * Book-level pagination result.
  *
  * @property chapters           Per-chapter page lists.

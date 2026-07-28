@@ -79,16 +79,16 @@ object EpubParser {
                     continue
                 }
                 val html = zip.getInputStream(htmlEntry).bufferedReader(Charsets.UTF_8).readText()
-                val plainText = htmlToPlainText(html)
-                if (plainText.isBlank()) continue
+                val richText = htmlToRichText(html)
+                if (richText.text.isBlank()) continue
 
                 // Try to extract a title from HTML <title> or first <h1>-<h6>
                 val chapterTitle = extractTitle(html) ?: itemref.idref
                 chapters.add(
                     EpubChapter(
                         title = chapterTitle,
-                        content = plainText,
-                        charCount = plainText.length
+                        richText = richText,
+                        charCount = richText.text.length
                     )
                 )
             }
@@ -198,11 +198,6 @@ object EpubParser {
                     }
                 }
                 XmlPullParser.END_TAG -> {
-                    when (parser.name) {
-                        "metadata", "manifest", "spine" -> {
-                            // Also handle namespaced endings
-                        }
-                    }
                     if (parser.name == "metadata" || parser.name.endsWith(":metadata"))
                         inMetadata = false
                     if (parser.name == "manifest") inManifest = false
@@ -244,18 +239,13 @@ object EpubParser {
         return ""
     }
 
-    // ── HTML → plain text ──
+    // ── HTML → rich text ──
 
     /**
-     * Strips HTML tags and decodes entities to produce plain text **with paragraph breaks**.
-     *
-     * Unlike a naïve tag-strip that collapses everything into one line (which made the
-     * paginator treat an entire chapter as a single un-pageable block), block-level elements
-     * and `<br>` are converted into newline separators so the downstream [ParagraphSplitter]
-     * can split the chapter into real paragraphs and the layout engine can paginate it
-     * normally across many pages.
-     *
-     * Uses regex for structural replacement + [android.text.Html] for entity decoding.
+     * Produces the plain-text body of an HTML chapter (block structure → paragraph breaks),
+     * mirroring the previous `htmlToPlainText` output exactly. The [RichText.text] field is
+     * defined to be byte-identical to this output so the layout cache, pagination keys,
+     * bookmarks and search remain valid across the rich-text migration.
      */
     private fun htmlToPlainText(html: String): String {
         var text = html
@@ -285,6 +275,53 @@ object EpubParser {
         text = text.replace(Regex(" *\n *"), "\n")
         text = text.replace(Regex("\n{3,}"), "\n\n")
         return text.trim()
+    }
+
+    /**
+     * Parses an HTML chapter into a [RichText]: the plain [RichText.text] (≡ [htmlToPlainText])
+     * plus [SpanSpec]s locating headings / bold / italic runs.
+     *
+     * Offsets are recovered by normalising each tag's inner HTML with [htmlToPlainText] (so the
+     * whitespace matches the canonical text) and locating that normalised substring within the
+     * full plain text. This keeps styling best-effort while guaranteeing [RichText.text] identity.
+     */
+    private fun htmlToRichText(html: String): RichText {
+        val plain = htmlToPlainText(html)
+        val spans = computeSpans(html, plain)
+        return RichText(plain, spans)
+    }
+
+    private fun computeSpans(html: String, plain: String): List<SpanSpec> {
+        val spans = mutableListOf<SpanSpec>()
+
+        // Headings h1..h6
+        for (level in 1..6) {
+            val regex = Regex("<h$level[^>]*>([\\s\\S]*?)</h$level>", RegexOption.IGNORE_CASE)
+            regex.findAll(html).forEach { m ->
+                val inner = htmlToPlainText(m.groupValues[1])
+                if (inner.isBlank()) return@forEach
+                val start = plain.indexOf(inner)
+                if (start >= 0) spans.add(SpanSpec(start, start + inner.length, SpanType.valueOf("H$level")))
+            }
+        }
+
+        // Strong / bold
+        Regex("<(strong|b)[^>]*>([\\s\\S]*?)</\\1>", RegexOption.IGNORE_CASE).findAll(html).forEach { m ->
+            val inner = htmlToPlainText(m.groupValues[2])
+            if (inner.isBlank()) return@forEach
+            val start = plain.indexOf(inner)
+            if (start >= 0) spans.add(SpanSpec(start, start + inner.length, SpanType.BOLD))
+        }
+
+        // Emphasis / italic
+        Regex("<(em|i)[^>]*>([\\s\\S]*?)</\\1>", RegexOption.IGNORE_CASE).findAll(html).forEach { m ->
+            val inner = htmlToPlainText(m.groupValues[2])
+            if (inner.isBlank()) return@forEach
+            val start = plain.indexOf(inner)
+            if (start >= 0) spans.add(SpanSpec(start, start + inner.length, SpanType.ITALIC))
+        }
+
+        return spans
     }
 
     /** Extracts a title from HTML <title> or first heading tag. */
@@ -331,7 +368,6 @@ object EpubParser {
         }
         return result.replace("//", "/")
     }
-}
 
     /**
      * Builds a filesystem-safe, fixed-length id for cover filenames from an arbitrary
@@ -346,19 +382,28 @@ object EpubParser {
 
 // ── Public data classes ──
 
-data class EpubMetadata(
-    val title: String,
-    val author: String?
-)
+    data class EpubMetadata(
+        val title: String,
+        val author: String?
+    )
 
-data class EpubChapter(
-    val title: String,
-    val content: String,
-    val charCount: Int
-)
+    /**
+     * A single EPUB chapter.
+     *
+     * @property title     Chapter title.
+     * @property richText  Rich-text payload (plain text + style spans). [RichText.text] is the
+     *                     canonical plain body, byte-identical to the legacy plain-text output.
+     * @property charCount Length of [RichText.text].
+     */
+    data class EpubChapter(
+        val title: String,
+        val richText: RichText,
+        val charCount: Int
+    )
 
-data class EpubResult(
-    val metadata: EpubMetadata,
-    val chapters: List<EpubChapter>,
-    val coverPath: String?
-)
+    data class EpubResult(
+        val metadata: EpubMetadata,
+        val chapters: List<EpubChapter>,
+        val coverPath: String?
+    )
+}

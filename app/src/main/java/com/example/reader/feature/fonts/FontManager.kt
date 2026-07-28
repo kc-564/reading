@@ -68,6 +68,29 @@ class FontManager(private val context: Context) {
             .getOrElse { Typeface.DEFAULT }
     }
 
+    /**
+     * Resolves a native [Typeface] with an explicit fallback chain.
+     *
+     * Android already falls back to system glyphs for code points a font lacks, but imported
+     * fonts that are missing a whole script (e.g. a Latin-only TTF opened for CJK text) can
+     * still render tofu. Wrapping the resolved base in [Typeface.create]`(base, NORMAL)` forces
+     * Android to honour its system fallback chain for any glyph the base cannot draw, which is
+     * the robust behaviour we want for the reader's primary typeface.
+     */
+    fun resolveTypefaceWithFallback(key: FontFamilyKey, importedId: String? = null): Typeface {
+        val base = resolveTypeface(key, importedId)
+        return Typeface.create(base, Typeface.NORMAL)
+    }
+
+    /**
+     * Normalises the visual weight of [base] to bold or normal. Used by rich-text heading
+     * rendering so a heading is guaranteed bold even when the resolved family has no dedicated
+     * bold face (imported fonts in particular). Returns a fresh [Typeface] of the requested weight.
+     */
+    fun normalizeWeight(base: Typeface, wantBold: Boolean): Typeface {
+        return Typeface.create(base, if (wantBold) Typeface.BOLD else Typeface.NORMAL)
+    }
+
     /** Lists imported font metadata persisted in [com.example.reader.prefs.AppPrefs]. */
     fun getImportedFonts(): List<ImportedFont> {
         val json = runCatching {

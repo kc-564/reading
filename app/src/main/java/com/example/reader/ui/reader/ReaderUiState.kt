@@ -34,6 +34,12 @@ sealed interface ReaderUiState {
         val currentGlobalPage: Int,
         val globalPercent: Float,
         val globalPages: List<GlobalPage>,
+        /**
+         * Per-chapter display [CharSequence] (the spannable carrying indent / spacing / rich
+         * styles) used to bake each page's bitmap. Keyed by chapter index. Rendering reads this
+         * instead of re-deriving the text so pagination and baking stay pixel-identical.
+         */
+        val chapterLayouts: Map<Int, CharSequence> = emptyMap(),
         /** Bumped every time pagination is (re)computed so the pager can re-target. */
         val paginationVersion: Int = 0
     ) : ReaderUiState

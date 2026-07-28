@@ -23,6 +23,10 @@ interface LayoutCacheDao {
     @Query("DELETE FROM layout_cache WHERE book_id = :bookId")
     suspend fun deleteByBookId(bookId: String)
 
+    /** Deletes every layout-cache row (used to purge stale entries after a formatting bump). */
+    @Query("DELETE FROM layout_cache")
+    suspend fun deleteAll()
+
     @Query("SELECT COUNT(*) FROM layout_cache WHERE book_id = :bookId")
     suspend fun countByBookId(bookId: String): Int
 }

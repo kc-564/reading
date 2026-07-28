@@ -11,6 +11,7 @@ import com.example.reader.data.StatsRepository
 import com.example.reader.db.AppDatabase
 import com.example.reader.db.BookEntity
 import com.example.reader.engine.BookPagination
+import com.example.reader.engine.BitmapCache
 import com.example.reader.engine.ChapterPages
 import com.example.reader.engine.GlobalPage
 import com.example.reader.engine.PageInfo
@@ -69,6 +70,11 @@ class ReaderViewModel(
     private val pagination = ReaderPagination()
     private val _layoutCache = LayoutCache(db.layoutCacheDao())
 
+    /** Memory budget (bytes) for the reader's [com.example.reader.engine.BitmapCache], device-tiered. */
+    val bitmapCacheBudgetBytes: Long = runCatching {
+        BitmapCache.budgetForDevice(getApplication())
+    }.getOrDefault(48L * 1024L * 1024L)
+
     /** Exposed so the Composable's pagination pass can hit the layout cache. */
     val layoutCache: LayoutCache get() = _layoutCache
     private val searchEngine = SearchEngine()
@@ -92,6 +98,9 @@ class ReaderViewModel(
 
     /** Accumulates per-chapter pages during an incremental pagination pass. */
     private val _accChapters = mutableListOf<ChapterPages>()
+
+    /** Accumulates per-chapter display CharSequences during an incremental pagination pass. */
+    private val _accLayouts = mutableMapOf<Int, CharSequence>()
 
     init {
         loadBook()
@@ -118,12 +127,13 @@ class ReaderViewModel(
                 if (format == "epub") {
                     val epubResult = EpubParser.parse(getApplication(), File(bookPath), bookPath)
                     chapters = epubResult.chapters.map { ch ->
-                        val lines = ch.content.split('\n')
+                        val lines = ch.richText.text.split('\n')
                         Chapter(
                             title = ch.title,
                             startLineIndex = 0,
                             lineCount = lines.size,
-                            contentLines = lines
+                            contentLines = lines,
+                            richText = ch.richText
                         )
                     }
                     epubTitle = epubResult.metadata.title
@@ -186,6 +196,7 @@ class ReaderViewModel(
                     currentGlobalPage = 0,
                     globalPercent = initialPercent,
                     globalPages = emptyList(),
+                    chapterLayouts = emptyMap(),
                     paginationVersion = 0
                 )
             } catch (e: Exception) {
@@ -242,6 +253,7 @@ class ReaderViewModel(
      */
     fun beginIncrementalPagination(): Int {
         _accChapters.clear()
+        _accLayouts.clear()
         lastPagination?.let { _accChapters.addAll(it.chapters) }
         return ++_paginationToken
     }
@@ -259,10 +271,11 @@ class ReaderViewModel(
      * [androidx.compose.runtime.State] write is dispatched to [kotlinx.coroutines.Dispatchers.Main]
      * so Compose state is only mutated on the main thread.
      */
-    fun appendChapterPages(chapterIndex: Int, pages: List<PageInfo>) {
+    fun appendChapterPages(chapterIndex: Int, pages: List<PageInfo>, display: CharSequence) {
         val incoming = ChapterPages(chapterIndex, pages)
         val existing = _accChapters.indexOfFirst { it.chapterIndex == chapterIndex }
         if (existing >= 0) _accChapters[existing] = incoming else _accChapters.add(incoming)
+        _accLayouts[chapterIndex] = display
 
         // Build the partial BookPagination from everything paginated so far.
         val chapterPagesSnapshot = ArrayList(_accChapters)
@@ -290,6 +303,7 @@ class ReaderViewModel(
                 currentGlobalPage = gPage,
                 globalPercent = percent,
                 globalPages = flat,
+                chapterLayouts = _accLayouts.toMap(),
                 paginationVersion = s.paginationVersion + 1
             )
         }
@@ -405,7 +419,7 @@ class ReaderViewModel(
 
     /** Exposes the layout-cache key builder so the Composable can reuse the same key. */
     fun buildCacheKey(fingerprint: String, cfg: ReaderStyleConfig, w: Int, h: Int): String =
-        _layoutCache.buildKey(fingerprint, cfg, w, h)
+        _layoutCache.buildKey(fingerprint, cfg.toSignature(), w, h)
 
     fun fingerprint(): String = FileFingerprint.compute(bookPath)
 

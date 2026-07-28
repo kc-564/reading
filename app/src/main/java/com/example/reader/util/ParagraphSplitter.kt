@@ -58,6 +58,13 @@ object ParagraphSplitter {
     }
 
     /**
+     * Returns the character offset of every paragraph's first character, in ascending order.
+     * Memoizable by callers that need to know which pages start a paragraph (for first-line
+     * indent).
+     */
+    fun paragraphStartOffsets(text: String): List<Int> = split(text).map { it.start }
+
+    /**
      * Greedy page packing from estimated paragraph heights. Pure and JVM-testable.
      *
      * A new page is started when adding the next paragraph (plus its inter-paragraph spacing)

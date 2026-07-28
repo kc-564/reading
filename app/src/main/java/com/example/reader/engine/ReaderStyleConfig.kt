@@ -1,5 +1,6 @@
 package com.example.reader.engine
 
+import android.text.Layout
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -62,17 +63,30 @@ data class ReaderStyleConfig(
     /**
      * Stable hash of only the fields that influence pagination. Excludes [themeMode],
      * [brightness], [pageAnimation], [readingMode], [rtl], [clickZones] and [textureKey].
+     *
+     * Retained (delegating to [toSignature]) for backward compatibility; new callers should use
+     * [toSignature] so the cache key also captures break-strategy / hyphenation / rich-version.
      */
-    fun layoutHash(): String = buildString {
-        append("fs=").append(fontScale).append(';')
-        append("ls=").append(lineSpacing).append(';')
-        append("ps=").append(paragraphSpacingPx).append(';')
-        append("lt=").append(letterSpacing).append(';')
-        append("pm=").append(pageMarginPx).append(';')
-        append("al=").append(alignment.toKey()).append(';')
-        append("fi=").append(firstLineIndentPx).append(';')
-        append("ff=").append(fontFamily.storageKey)
-    }
+    fun layoutHash(): String = toSignature().hash()
+
+    /**
+     * Builds the [LayoutSignature] — the canonical, cache-affecting description of this config.
+     * Excludes non-layout fields (theme, brightness, animation, …) so a theme switch does not
+     * trigger a full-book re-pagination.
+     */
+    fun toSignature(): LayoutSignature = LayoutSignature(
+        fontScale = fontScale,
+        lineSpacing = lineSpacing,
+        paragraphSpacingPx = paragraphSpacingPx,
+        letterSpacing = letterSpacing,
+        pageMarginPx = pageMarginPx,
+        alignmentKey = alignment.toKey(),
+        firstLineIndentPx = firstLineIndentPx,
+        fontFamilyKey = fontFamily.storageKey,
+        breakStrategy = Layout.BREAK_STRATEGY_HIGH_QUALITY,
+        hyphenation = Layout.HYPHENATION_FREQUENCY_NORMAL,
+        richVersion = 1
+    )
 
     companion object {
         /** Base font size (sp) before [fontScale] is applied. */
